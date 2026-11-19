@@ -371,6 +371,15 @@ test('a garbled gatekeeper reply is never retried and stops the run', async () =
   assert.equal(gateCalls, 1, 'close-stage and open-stage change state: repeating them is not safe')
 })
 
+test('a prepare without a readable pipeline-plan is not reported as an invalid manifest', async () => {
+  const garbled = await simulate({ garble: true })
+  assert.match(garbled.result.detail, /^the gatekeeper returned no usable result/)
+  const silent = await simulate({ gate: cmd => (cmd === 'pipeline-plan' ? { exit_code: 0, output: '' } : null) })
+  assert.equal(silent.result.detail, 'pipeline-plan produced no readable output')
+  const invalid = await simulate({ gate: cmd => (cmd === 'pipeline-plan' ? { exit_code: 1, output: 'ERROR: WP-01 has no files' } : null) })
+  assert.equal(invalid.result.detail, 'pipeline-plan failed: the manifest is not valid')
+})
+
 test('a stage that fails stops the batch: nothing after it runs', async () => {
   const { gates } = await simulate({ gate: cmd => (cmd.startsWith('close-stage 2 ') ? { exit_code: 3, output: 'OUTSIDE OWNERSHIP' } : null) })
   assert.ok(!gates.includes('verify'), 'verify must not run after a failed close-stage')

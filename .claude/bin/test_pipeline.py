@@ -264,6 +264,17 @@ class EngineTests(unittest.TestCase):
             raise OSError("no process")
         result = pipeline.Pipeline(SPEC, gate, lambda *a: None).execute()
         self.assertEqual(result["failed_stage"], "prepare")
+        self.assertTrue(result["detail"].startswith("the gatekeeper returned no usable result"), result["detail"])
+
+    def test_only_a_refused_manifest_reads_as_invalid_at_prepare(self):
+        for plan_step, detail in (({"cmd": "pipeline-plan", "exit_code": 0, "output": ""},
+                                   "pipeline-plan produced no readable output"),
+                                  ({"cmd": "pipeline-plan", "exit_code": 1, "output": "ERROR: WP-01 has no files"},
+                                   "pipeline-plan failed: the manifest is not valid")):
+            def gate(cmds, label, step=plan_step):
+                return {"steps": [{"cmd": "hooks-check", "exit_code": 0, "output": "ok"}, step]}
+            result = pipeline.Pipeline(SPEC, gate, lambda *a: None).execute()
+            self.assertEqual((result["failed_stage"], result["detail"]), ("prepare", detail))
 
     def test_structured_report_formats(self):
         import agentic

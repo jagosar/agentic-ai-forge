@@ -277,8 +277,13 @@ class Pipeline:
             return self.stop("prepare", HOOKS_DEAD, gate=hook_step)
         plan_step = self.step(first, 1)
         self.plan = lines_json(plan_step["output"]) if self.ok(plan_step) else None
+        # Only a pipeline-plan that ran and refused the manifest says the manifest is invalid; a lost reply does not.
+        if first is None:
+            return self.stop("prepare", LOST)
         if not self.plan:
-            return self.stop("prepare", "pipeline-plan failed: the manifest is not valid", gate=plan_step)
+            return self.stop("prepare", "pipeline-plan failed: the manifest is not valid"
+                             if plan_step and not self.ok(plan_step) else "pipeline-plan produced no readable output",
+                             gate=plan_step)
         plan = self.plan
         self.rules, self.run["rules"] = rules_of(plan)
         self.impl_rules = "" if plan.get("implementer_rules") is False else self.rules
