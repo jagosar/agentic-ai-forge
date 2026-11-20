@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s .claude/bin -p "test_launcher.py"
 """
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -368,7 +369,8 @@ class RequireCliTests(unittest.TestCase):
 
     def test_it_runs_once_and_a_timeout_only_warns(self):
         timeout = subprocess.TimeoutExpired(["claude"], launch.AUTH_TIMEOUT_S)
-        with mock.patch.dict(os.environ, {"AGENTIC_CLAUDE": sys.executable}), \
+        claude = shlex.join([Path(sys.executable).as_posix()])  # shlex would eat a Windows path's backslashes
+        with mock.patch.dict(os.environ, {"AGENTIC_CLAUDE": claude}), \
                 mock.patch.object(launch.subprocess, "run", side_effect=timeout) as run, \
                 mock.patch("sys.stderr") as err:
             launch.require_cli({})
