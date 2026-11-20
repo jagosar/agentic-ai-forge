@@ -47,9 +47,10 @@ def code_lines(root):
 
 
 def prompt_bytes(root):
-    """Bytes of what the agents read as instructions: agents, commands and the rules library."""
+    """Bytes of what the agents read as instructions: agents, commands and the rules library, with LF line endings
+    (a Windows checkout writes CRLF)."""
     root = Path(root)
-    return sum(p.stat().st_size for pattern in PROMPT_GLOBS for p in root.glob(pattern))
+    return sum(len(p.read_bytes().replace(b"\r\n", b"\n")) for pattern in PROMPT_GLOBS for p in root.glob(pattern))
 
 
 def budget_problems(root):
@@ -136,6 +137,15 @@ class LeanTests(unittest.TestCase):
     @FLOW_REPO_ONLY  # projects do not carry the flow's budget
     def test_the_flow_stays_within_its_budget(self):
         self.assertEqual(budget_problems(ROOT), [])
+
+    def test_prompt_bytes_ignore_line_endings(self):
+        # A Windows checkout (core.autocrlf=true) writes CRLF: the budget must measure the same flow.
+        with tempfile.TemporaryDirectory() as d:
+            agents = Path(d) / ".claude/agents"
+            agents.mkdir(parents=True)
+            (agents / "lf.md").write_bytes(b"a\nb\n")
+            (agents / "crlf.md").write_bytes(b"a\r\nb\r\n")
+            self.assertEqual(prompt_bytes(d), 8)
 
     def test_relative_and_local_imports_are_never_reported(self):
         self.assertEqual(sorted(_python_imports_of("from . import x\nfrom .a import b\nimport os.path\n")), ["os"])
