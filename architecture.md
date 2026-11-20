@@ -1,48 +1,42 @@
-# Architecture: make the guard run on Windows, and say why when it does not (agentic-flow 2.16.0)
-Type: change · Size: standard
+# Architecture: field bug fixes — annexes, references, stale copies, network and a second session (agentic-flow 2.17.0)
+Type: fix · Size: standard
 
 ## 1. Goal
-On Windows with Claude Desktop, `/implement` could not start because the guardrail hook did not run. A field report traced the likely cause:
-- Claude Code did not find Git Bash, which was installed per user, outside Program Files.
-- Without Git Bash, hooks run in PowerShell, where `"$CLAUDE_PROJECT_DIR/..."` is not expanded, so the hook pointed at `C:\.claude\bin\hook.py`.
-- Setting `CLAUDE_CODE_GIT_BASH_PATH` fixed it.
+Windows field runs and the first update of a GitLab project found five defects. The flow drops plan annexes from the agents' briefs (issue 122). `validate` refuses true `read` references to dotfiles and files without an extension, and splits a 4b cell on an escaped pipe (issue 123). `doctor` reports forever a "new version kept beside your edits" that install later made obsolete. The fallback launches every agent against an API it cannot reach when a terminal lacks the proxy variables (issue 125). A run can be broken by another Claude Code session working in the same folder (issue 124).
 
-This design makes the native workflow work there, with no CLI. `agentic.py doctor` detects the case on Windows, and `doctor --fix` writes the path into `.claude/settings.local.json`, the route the Claude Code docs give. A failed live `hooks-check` says which cause applies, Git Bash first. For the fallback, which the user wants only when needed, there are two changes:
-- the agents' environment drops `CLAUDE_CODE_SIMPLE`, the one inherited variable documented to switch off the saved login, and nothing else;
-- `require_cli` reads the documented exit code and `authMethod`, and stops repeating the false claim that Claude Desktop's sign-in is not shared.
-
-Issues 120 and 121.
+This design fixes the five. Every criterion is a test that fails on today's code. The release is 2.17.0, because `sessions-check` and the network check are new behaviour.
 
 ## 2. Scope
 ### Included
-- **Git Bash detection.** `guardrail.git_bash_state()` is a pure function with injectable inputs. On Windows it reports:
-  - whether `CLAUDE_CODE_GIT_BASH_PATH` is set, in the environment or in a settings file's `env`;
-  - whether Git Bash is at a default Program Files path;
-  - the `bash.exe` that belongs to the `git.exe` on the PATH.
-
-  Off Windows it returns `None`.
-- **`hooks-check` diagnosis** (already implemented in this branch, kept): it gains `git_bash` and a Git Bash hint first in the list.
-- **`doctor`:**
-  - a `git-bash` finding: `auto` when a Git Bash was found outside the defaults and nothing configures it, `mention` when none was found;
-  - `doctor --fix` writes `env.CLAUDE_CODE_GIT_BASH_PATH` into `.claude/settings.local.json`, keeping the rest of that file.
-- **`core.child_env`** drops `CLAUDE_CODE_SIMPLE`, and only that, in every mode.
-- **`launch.require_cli`** (already implemented, kept and corrected):
-  - logged out means a JSON answer with exit code 1, `authMethod: "none"` or `loggedIn: false`, and stops the run;
-  - an answer that is not JSON warns and goes on;
-  - the logged-out message lists the names of the inherited `CLAUDE_*` and `ANTHROPIC_*` variables, never their values, and makes no claim about Claude Desktop's sign-in.
-- **The fake `claude`** answers logged out as the docs describe: `{"authMethod": "none"}`, exit 1.
-- **Docs:**
-  - `/implement`: `doctor --fix` for Git Bash, `AGENTIC_CLAUDE`, and the inherited variables;
-  - the how-to hub, still at 260 lines or fewer, and `how-it-works.md`;
-  - upgrade notes for 2.16.0, rewritten.
-- **Release 2.16.0:** `test_acceptance_v216.py` rewritten for this design; `test_runner_reports.py` keeps v215's classes, as already done.
+- **Briefs keep annexes (122).** Every `## ` heading that is not a numbered section (`## Annex A · Catalogue`, `## Anexo`) starts an annex. Every brief, the test-author's and each package's, keeps every annex. `/architect` documents the form.
+- **`validate` references (123):**
+  - a `read` row's reference may name a dotfile (`.gitignore:1-8`);
+  - it may name a file without an extension (`Makefile:1`) when that file exists;
+  - `\|` outside backticks is part of a cell, not a separator.
+- **Stale kept copies:**
+  - `install` deletes `.claude/state/upgrade/<path>` whenever it does not keep `<path>`, that is when the file is new, updated or unchanged;
+  - `doctor` splits the kept copies into live ones (the installed file is still edited) and stale ones;
+  - stale copies are a new `upgrade-stale` `auto` finding, and `doctor --fix` deletes them;
+  - `upgrade-pending` counts only live copies.
+- **Network pre-flight for the fallback (125):**
+  - when `auth status` reports `apiProvider: "firstParty"`, `require_cli` sends one request to the API host through the agents' environment and proxy variables, before any agent;
+  - DNS, connect or timeout failures and a proxy's 407 stop the run with exit 1, naming the host, the reason and the names of the proxy variables that are set, never their values;
+  - other providers (Bedrock, Vertex) and an answer without `apiProvider` are not checked.
+- **A second session refuses `/implement` (124):**
+  - the hook records the `session_id` of every main-thread call (no `agent_type`, no `AGENTIC_WP`) in the heartbeat, with its time, keeping only the last 10 minutes;
+  - a new `agentic.py sessions-check`, run inside a Claude tool call, exits 3 when another session called the hook in this root within 10 minutes;
+  - `/implement` runs it in its pre-flight. On 3 it shows the other sessions and asks the user whether they are closed (a restart of Claude Code or `/clear` leaves the previous session's calls behind, under another id). If the user says so, it runs `sessions-check --ignore <id>` for each one, which forgets those ids and passes; otherwise it stops and recommends a git worktree.
+- **Release 2.17.0:**
+  - `test_acceptance_v217.py`;
+  - the unique checks of `test_acceptance_v216.py` moved to `test_hook_diagnosis.py` and the old file deleted;
+  - upgrade notes, `plugin.json`, the docs.
 
 ### Excluded (non-goals)
-- **No change to the hook commands** (exec form). The minimum Claude Code version that supports it is unknown.
-- **No stripping of other variables.** This cloud container authenticates through variables that a full strip would remove; the user is wary of it.
-- **No auto-detection of Claude Desktop's bundled CLI.** The user prefers the native workflow, and `AGENTIC_CLAUDE` is documented.
-- **No writing of settings outside `doctor --fix`.** `install` does not write them, and `hooks-check` only points at the fix.
-- **Separate issues:** briefs that drop annexes, the dotfile reference regex, a branch or worktree lock for `/implement`, and a network check.
+- **Issue 118** (auto mode blocking an implementer's tests): not reproduced.
+- **No lock and no worktree automation for 124.** The check refuses and recommends; it does not create worktrees. A session that has made no tool call in the last 10 minutes is not seen.
+- **The native workflow and the engines do not call `sessions-check`.** Only the `/implement` launcher does, before the workflow starts. The workflow's gatekeeper is a subagent whose `session_id` is not verified.
+- **No network check in the native workflow.** Its agents are subagents of a session that already works.
+- **No change to how `install` classifies files** (new, updated, unchanged, kept), only the cleanup of kept copies.
 
 ## 3. Stack
 Python 3.9+ (the standard library only), Node 20+ for the workflow harness. Commands, as in CI:
@@ -58,370 +52,470 @@ Run `export CLAUDE_PROJECT_DIR=$PWD` before them.
 
 ## 4. Repository structure
 ```
-.claude/bin/guardrail.py                       WP-01
-.claude/bin/test_guardrail.py                  WP-01
-.claude/bin/doctor.py                          WP-02
-.claude/bin/test_doctor.py                     WP-02
-.claude/bin/core.py                            WP-03
-.claude/bin/launch.py                          WP-03
-.claude/bin/testutil.py                        WP-03
-.claude/bin/test_launcher.py                   WP-03
-.claude/commands/implement.md                  WP-04
-docs/how-to/README.md                          WP-04
-docs/how-it-works.md                           WP-04
-.claude-plugin/plugin.json                     WP-04 (already 2.16.0)
-.claude/bin/upgrade.py                         WP-04
-.claude/bin/test_runner_reports.py             WP-04 (already moved from v215)
-.claude/bin/test_acceptance_v216.py            AT (rewritten)
-.claude/flow-history.json                      regenerated by hand as the PR's last commit
+.claude/bin/brief.py                     WP-01  annex sections
+.claude/bin/test_brief.py                WP-01
+.claude/bin/manifest_check.py            WP-02  references and cells of section 4b
+.claude/bin/test_manifest_check.py       WP-02
+.claude/bin/installer.py                 WP-03  deletes kept copies it no longer needs
+.claude/bin/doctor.py                    WP-03  upgrade-stale finding and repair
+.claude/bin/test_install.py              WP-03
+.claude/bin/test_doctor.py               WP-03
+.claude/bin/launch.py                    WP-04  network pre-flight
+.claude/bin/testutil.py                  WP-04  FAKE_PROVIDER in the fake auth status
+.claude/bin/test_launcher.py             WP-04
+.claude/bin/core.py                      WP-05  SESSION_WINDOW_S
+.claude/bin/guardrail.py                 WP-05  sessions in the heartbeat, sessions_check()
+.claude/bin/agentic.py                   WP-05  the sessions-check command
+.claude/bin/test_guardrail.py            WP-05
+.claude/bin/test_definitions.py          WP-05  the command count and the docstring
+.claude/commands/implement.md            WP-06
+.claude/commands/architect.md            WP-06
+docs/how-to/README.md                    WP-06
+docs/how-it-works.md                     WP-06
+.claude-plugin/plugin.json               WP-06  2.17.0
+.claude/bin/upgrade.py                   WP-06  NOTES["2.17.0"]
+.claude/bin/test_hook_diagnosis.py       WP-06  moved from test_acceptance_v216.py (new)
+.claude/bin/test_acceptance_v216.py      WP-06  deleted
+.claude/flow-history.json                WP-06  regenerated as the last commit
+.claude/bin/test_acceptance_v217.py      AT     (new)
 ```
 
 ## 4b. Existing code context
-The branch `claude/release-2-16-0` already holds the first version of this design's code, uncommitted: `hook_diagnosis`, `require_cli`, the fake's `auth status`, the docs and the release. This design keeps it and changes what section 2 lists.
-
 | What an implementer needs to know | Where it is (`file:lines`) | Pattern or rule | Source |
 |---|---|---|---|
-| The diagnosis: `_json_file`, `_declares_hook`, `_settings_entries`, `_hook_command`, `_git`, `_worktree`, `_heartbeat(s)`, `_hints`, `hook_diagnosis`, and its use in `hooks_check` | `.claude/bin/guardrail.py:349-470` | Small private helpers that never raise; `_hints` returns a list in a fixed order, with the "/hooks" fallback last | read |
-| The dead-hook message, which already names python3 and worktrees | `.claude/bin/guardrail.py:69-77` | It gains "Git Bash not found" | read |
-| The operating-system layer: `IS_WINDOWS`, `resolve` | `.claude/bin/compat.py:17`, `.claude/bin/compat.py:73-79` | Windows decisions read `compat.IS_WINDOWS`; tests inject instead of patching the OS | read |
-| `doctor`: findings as dicts (`auto`, `route`, `mention`), a fixed order in `diagnose()`, repairs keyed by code in `REPAIRS`, `report(fix)` re-diagnoses after repairing | `.claude/bin/doctor.py:22-130` | A new `auto` finding needs an entry in `REPAIRS`; `diagnose()` never writes | read |
-| `doctor` tests run the command in a temporary `Repo` and parse its last JSON line | `.claude/bin/test_doctor.py:37-60` | On Linux no `git-bash` finding may appear | read |
-| `.claude/settings.local.json` is written by `sync-permissions`, merging into what is there | `.claude/bin/installer.py:127-141` | Same: read the JSON, change one key, write it back with `indent=2` | read |
-| The agents' environment (also used by `verification.py` for the verify commands, which lose `CLAUDE_CODE_SIMPLE` too) | `.claude/bin/core.py:321-326` | `dict(os.environ, **extra)`, minus `API_AUTH_VARS` under `subscription`. Add `CLAUDE_CODE_SIMPLE` to what is always removed | read |
-| `require_cli`, `_auth_status`, `_cli_argv`, the memo and `AUTH_TIMEOUT_S` | `.claude/bin/launch.py:49-92` | `_auth_status` returns the parsed JSON or None; it must now also return the exit code | read |
-| The fake's `auth status` answer and `auth.log` | `.claude/bin/testutil.py:51-70` | `FAKE_AUTH=out` changes to `{"authMethod": "none"}`, exit 1 | read |
-| The acceptance file of the first version | `.claude/bin/test_acceptance_v216.py:43-267` | Rewritten by the test-author for this design; its fixed PATH/HOME setup for the diagnosis stays | read |
-| Claude Code on Windows runs hook commands in Git Bash, or in PowerShell when Git Bash is not installed | code.claude.com/docs/en/hooks.md ("Git Bash on Windows, or PowerShell when Git Bash isn't installed") | Without Git Bash, a shell-form hook "can fail" | inferred |
-| `CLAUDE_CODE_GIT_BASH_PATH`: "Windows only: path to the Git Bash executable (bash.exe). Use when Git Bash is installed but not in your PATH"; the setup page shows it in a settings file's `env` | code.claude.com/docs/en/env-vars.md, code.claude.com/docs/en/setup.md | The route `doctor --fix` takes. Whether it applies without a restart is not documented: the message says to restart Claude Code | inferred |
-| `CLAUDE_CODE_SIMPLE=1`: "OAuth tokens and keychain credentials aren't read" | code.claude.com/docs/en/env-vars.md | Why it is dropped for the agents | inferred |
-| `claude auth status`: "Exits with code 0 if logged in, 1 if not"; `authMethod` is one of `none`, `claude.ai`, `oauth_token`, `api_key`, `api_key_helper`, `third_party`. `loggedIn` is not documented, but CLI 2.1.329 prints it here | code.claude.com/docs/en/cli-reference.md; `claude auth status --json` run here | Read all three | inferred |
-| How Claude Code itself searches for Git Bash (PATH, Program Files, the registry) | not documented | `git_bash_state` checks the two Program Files defaults and the `bash.exe` next to the `git.exe` on PATH; the field case had none set and Git under `AppData\Local\Programs\Git` | inferred |
-| Tests that pin wording this plan changes | `.claude/bin/test_acceptance_v216.py:233-252` (Claude Desktop sign-in text), `.claude/bin/test_launcher.py:343-382` (`CliBeforeStateTests`, `RequireCliTests`) | The AT rewrites the first; WP-03 keeps the second green | read |
+| `split()` cuts a plan at `## N. ` only (`SECTION_RE`); any other `## ` line stays inside the previous section, and fenced lines never start one | `.claude/bin/brief.py:10-28` | Add a third kind, `("annex", heading, lines)`, for an unfenced `## ` line that does not match `SECTION_RE`; keep `pre` and `section` as they are | read |
+| `slice_architecture` keeps `pre` and the sections in `WP_SECTIONS`/`AT_SECTIONS`, reduces section 8, drops the rest; an annex after section 8, 10 or (for the test-author) 11 is lost today | `.claude/bin/brief.py:80-104` | Keep every `annex` part in every brief, in document order | read |
+| `manifest_check` imports `split` for section 4b; it only looks at `kind == "section"`, so a new kind does not disturb it | `.claude/bin/manifest_check.py:17`, `.claude/bin/manifest_check.py:420-433` | No change needed there | read |
+| Brief tests build a small plan text (`TEXT`) and a manifest, and call `slice_architecture` | `.claude/bin/test_brief.py:36-60` | Same style: in-memory text, assertIn/assertNotIn | read |
+| `REF_TOKEN_RE` needs a character before an extension's dot, so a dotfile reference (.gitignore, lines 1 to 8) and an extensionless one (Makefile, line 1) are not references; `table_cells` splits on every `|` outside backticks, including `\|`; `reference_ok` checks existence and range | `.claude/bin/manifest_check.py:393-430` | A token is a candidate when it matches `path:start[-end]` and its path holds a `/` or a `.` or names an existing file; `localhost:8080` stays ignored | read |
+| Provenance tests call `table_cells` and `provenance_problems` on texts built in the test | `.claude/bin/test_manifest_check.py:125-153` | Same style; references are relative to the project root, which is this repo in tests | read |
+| `install_write` writes a kept file's new version to `.claude/state/upgrade/<rel>` and never deletes an old one; `unchanged` files are not written at all | `.claude/bin/installer.py:212-230` | After the loop, for every `rel` whose kind is not `kept`, delete `target/.claude/state/upgrade/<rel>` if it exists (not in a dry run) | read |
+| The install record maps each shipped path to the hash it recorded; for a kept file it keeps the previous hash, which differs from the edited file's | `.claude/bin/installer.py:212-226` | A kept copy is stale when the installed file is missing, the path is not in the record, or the installed file's hash equals the recorded one | read |
+| `compat.content_hash(path)` is the hash install uses (CRLF-insensitive); the record is `{"version", "files": {rel: hash}}` | `.claude/bin/installer.py:226`, `.claude/bin/installer.py:244-245` | Use it in doctor too, never `hashlib` directly | read |
+| doctor: findings in a fixed order in `diagnose()`, `upgrade-pending` counted from every file under `UPGRADE_DIR`, repairs keyed by code in `REPAIRS`, `report()` re-diagnoses after repairing | `.claude/bin/doctor.py:20`, `.claude/bin/doctor.py:104-136`, `.claude/bin/doctor.py:138-179` | `diagnose()` never writes; a new `auto` code needs a `REPAIRS` entry | read |
+| doctor tests: a temporary `Repo` with an install record, run `doctor`, parse the last JSON line; one test pins `upgrade-pending` for a copy the record does not know | `.claude/bin/test_doctor.py:39-60`, `.claude/bin/test_doctor.py:222-227` | Same style; that test changes (WP-03) | read |
+| `InstalledCopyTests` installs into a temporary target from a temporary source and runs the target's own `agentic.py` | `.claude/bin/test_install.py:292-332` | Same fixture for the kept-copy tests | read |
+| `require_cli`: once per process, the binary, then `auth status` with the agents' environment; logged out stops with `die`, an unreadable status warns | `.claude/bin/launch.py:49-110` | Add the network step after the login check, inside the same once-per-process memo; reuse `child_env(cfg)` for the environment | read |
+| This container's proxy re-signs TLS with its own CA (`/root/.ccr/ca-bundle.crt`); Node gets it, Python's default context may not | not a file: environment | A certificate error counts as reachable | inferred |
+| The real `auth status --json` prints `apiProvider: "firstParty"` (seen in this container with Claude Code 2.1.329), and answers in 0.26 s with a dead proxy: it does not reach the network | not a file: command output | The check keys on `apiProvider`, and must make its own request | inferred |
+| The fake `claude` answers `auth status` without `apiProvider`, so existing tests never trigger a network request | `.claude/bin/testutil.py:55-66` | Add `FAKE_PROVIDER`: when set, the logged-in answer carries `"apiProvider": <value>` | read |
+| Launcher unit tests patch `os.environ` and `launch.subprocess.run`, and clear `_CLI_CHECKED` | `.claude/bin/test_launcher.py:357-381` | Same style; inject the opener instead of touching the network | read |
+| `child_env` copies `os.environ`, drops `CLAUDE_CODE_SIMPLE` and, under `subscription`, the API keys; proxy variables pass through | `.claude/bin/core.py:322-329` | Read proxy variables from `child_env(cfg)`, never from `os.environ` directly | read |
+| The heartbeat file and its constants | `.claude/bin/core.py:32-34` | Add `SESSION_WINDOW_S = 600` beside them | read |
+| `locked_json(path, fn)` reads, calls `fn`, writes what `fn` returns; a corrupt file is set aside | `.claude/bin/core.py:353-372` | The hook's update stays one `locked_json` call | read |
+| `record_hook_seen` rewrites the heartbeat on every hook call with `ts`, `tool`, `command`, `agent_type`, `guarded_ts`; `is_flow_agent` decides flow-agent calls | `.claude/bin/guardrail.py:314-333` | Add `session_id` (of this call, any caller) and `sessions` (`{id: ts}`, main-thread calls only, pruned to `SESSION_WINDOW_S`) | read |
+| `hooks_check` live mode reads the heartbeat with `locked_json(HOOK_SEEN, lambda s: None)`, prints one JSON line, returns 0 or 3; outside a Claude call (`CLAUDECODE` unset) it checks the settings | `.claude/bin/guardrail.py:499-525` | `sessions_check` follows the same shape: one JSON line on stdout, the explanation on stderr, 0 or 3 | read |
+| `hook()` calls `record_hook_seen(data)` with the raw payload | `.claude/bin/guardrail.py:527-541` | The payload's `session_id` is a documented common hook input field; that subagent calls carry the parent's is not verified, which is why only main-thread calls are recorded | inferred |
+| The command table is pinned: count 36 and one docstring line per command | `.claude/bin/test_definitions.py:504-507` | WP-05 updates it to 37 and adds `sessions-check` to the docstring | read |
+| Command table and a simple handler | `.claude/bin/agentic.py:113-114`, `.claude/bin/agentic.py:368-377` | `"sessions-check": cmd_sessions_check`, returning the function's code | read |
+| Hook-check tests: `RepoCase` with `put_seen`, `hook(payload)`, `check(live)` | `.claude/bin/test_guardrail.py:44-67`, `.claude/bin/test_guardrail.py:95-101` | Same helpers for `sessions-check` | read |
+| `/implement` pre-flight steps | `.claude/commands/implement.md:15-22` | Insert the sessions check as step 2, renumber the rest | read |
+| `/architect`'s document skeleton, inside a fence, ends at section 11 | `.claude/commands/architect.md:119-190` | Add one sentence after the skeleton on annexes | read |
+| The how-to hub is capped at 260 lines and is at 260 | `docs/how-to/README.md:181` | Edit in place: the `hooks-check` line of the command list also names `sessions-check` | read |
+| The previous release's acceptance file (test_acceptance_v216.py, its ReleaseTests at lines 417-431 before this change deletes it) and how 2.16.0 moved 2.15.0's classes | `.claude/bin/test_runner_reports.py:1-27` | Move every class but `ReleaseTests`; the docs class gets `FLOW_REPO_ONLY` | read |
+| Upgrade notes, newest first | `.claude/bin/upgrade.py:156-168` | Add `"2.17.0"` above `"2.16.1"` | read |
+| At most one `test_acceptance*.py` in `.claude/bin` | `.claude/bin/test_layout.py:1-22` | Delete `test_acceptance_v216.py` in the same change | read |
 
-What must not change:
-- the live and static success output of `hooks-check`, and the keys its failure JSON already has;
-- `doctor`'s existing findings and their order, apart from the new one appended last;
-- the agents' environment, apart from `CLAUDE_CODE_SIMPLE`;
-- one `auth status` call per process.
+What must **not** change:
+- the classification in `install_plan`;
+- `hooks-check`'s output and exit codes;
+- `require_cli`'s login messages;
+- the engines;
+- a brief's content for a plan without annexes (byte for byte).
 
 ## 5. Data model
+The heartbeat, `.claude/state/hook-seen.json`, gains two keys:
 ```python
-# guardrail.git_bash_state(...) returns None off Windows, else:
 {
-  "configured": str | None,   # CLAUDE_CODE_GIT_BASH_PATH from the environment, else from the first settings env that sets it
-                              # (counted even if that file does not exist: the person set it on purpose)
-  "default": str | None,      # the first existing of DEFAULT_GIT_BASH
-  "derived": str | None,      # the bash.exe that belongs to the git.exe on PATH, when that file exists
-  "needs_path": bool,         # not configured, no default, derived found: doctor --fix can write it
-  "missing": bool,            # not configured, no default, nothing derived: Git Bash not found
+  "ts": 1763650000.0, "tool": "Bash", "command": "...", "agent_type": None, "guarded_ts": None,  # as today
+  "session_id": "abc123...",          # the session of this (latest) call, whoever made it; absent if the payload had none
+  "sessions": {"abc123...": 1763650000.0, "def456...": 1763649800.0},
+  # main-thread calls only (no agent_type, AGENTIC_WP unset), entries older than SESSION_WINDOW_S dropped on each write
 }
-DEFAULT_GIT_BASH = ("C:\\Program Files\\Git\\bin\\bash.exe", "C:\\Program Files (x86)\\Git\\bin\\bash.exe")
-# derived: from which("git") = <root>\cmd\git.exe, <root>\bin\git.exe or <root>\mingw64\bin\git.exe,
-# the candidate is <root>\bin\bash.exe (ntpath, so the logic runs and is tested on any OS).
-
-# hook_diagnosis() gains "git_bash": git_bash_state() (None off Windows), read with the settings it already reads.
-
-# doctor finding (appended last in diagnose()):
-{"code": "git-bash", "severity": "auto", "message": "...<derived>...", "fix": "write CLAUDE_CODE_GIT_BASH_PATH=<derived> to .claude/settings.local.json"}
-{"code": "git-bash", "severity": "mention", "message": "Git Bash was not found: install Git for Windows, or set CLAUDE_CODE_GIT_BASH_PATH"}
 ```
+`sessions-check` JSON line:
+```python
+{"ok": True, "mode": "live", "session": "abc12345", "others": []}
+{"ok": False, "mode": "live", "session": "abc12345", "others": [{"session": "def45678", "age_s": 200}],
+ "reason": "another Claude Code session used this folder within the last 10 minutes"}
+{"ok": True, "mode": "not checked", "reason": "outside a Claude Code tool call" | "the hook recorded no session id"}
+```
+Session ids are shown cut to 8 characters.
 
 ## 6. Contracts between modules
 ```python
-# .claude/bin/guardrail.py  (WP-01)
-DEFAULT_GIT_BASH = ("C:\\Program Files\\Git\\bin\\bash.exe", "C:\\Program Files (x86)\\Git\\bin\\bash.exe")
-def git_bash_state(is_windows=None, environ=None, settings_envs=None, which=shutil.which, exists=os.path.isfile):
-    """Section 5. Defaults: compat.IS_WINDOWS, os.environ, the "env" objects of ROOT/.claude/settings.json,
-    ROOT/.claude/settings.local.json and ~/.claude/settings.json (in that order; a missing or malformed file or env
-    is skipped). Never raises."""
-# _hints gains, first, when d["git_bash"] is not None:
-#   needs_path: "Claude Code may not find Git Bash (it is at <derived>, outside Program Files): without it hooks run in
-#                PowerShell and the hook command breaks. Run `python3 .claude/bin/agentic.py doctor --fix` (it writes
-#                CLAUDE_CODE_GIT_BASH_PATH to .claude/settings.local.json) and restart Claude Code"
-#   missing:    "Git Bash was not found: install Git for Windows, or set CLAUDE_CODE_GIT_BASH_PATH"
-# and either of these counts as an explanation (no "/hooks" fallback hint with it).
+# brief.py
+def split(text):
+    """[(kind, key, lines)]: ("pre", None, lines) first; ("section", "4b", lines) for '## N. ' headings;
+    ("annex", "<heading text without '## '>", lines) for any other unfenced '## ' heading. Concatenating every
+    part's lines gives back the text."""
 
-# .claude/bin/doctor.py  (WP-02)
-SETTINGS_LOCAL = ROOT / ".claude" / "settings.local.json"  # module level, so tests can point it at a temporary file
-def git_bash_finding(state):
-    """The "git-bash" finding for a git_bash_state() result, or None (None state, configured, or default)."""
-def write_git_bash_path(settings_local, bash):
-    """Sets env.CLAUDE_CODE_GIT_BASH_PATH = bash in the JSON file settings_local (a Path), creating the file or the
-    "env" object when missing and keeping every other key. A file that is not a JSON object is left alone and
-    raises ValueError."""
-def diagnose(git_bash=git_bash_state): ...   # appends git_bash_finding(git_bash()) last, when not None
-def repair(findings, git_bash=git_bash_state): ...
-#   "git-bash" is handled inside repair, not in REPAIRS (whose entries take no argument): it calls git_bash(), and
-#   when its "derived" is a path, write_git_bash_path(SETTINGS_LOCAL, derived). A None derived, an OSError or a
-#   ValueError leaves the file alone and the code out of "fixed"; no traceback reaches the user (the finding stays in
-#   the re-diagnosis). The other codes keep using REPAIRS as today.
-def report(fix=False, git_bash=git_bash_state): ...  # passes git_bash to repair and to both diagnoses
-# `git_bash` is a callable returning a git_bash_state() result: tests pass one that reads their temporary
-# SETTINGS_LOCAL, so after --fix the re-diagnosis sees the path configured and the finding is gone.
+def slice_architecture(text, ident, manifest):  # unchanged signature; every "annex" part is kept, in order
 
-# .claude/bin/core.py  (WP-03)
-CHILD_ENV_DROPPED = ("CLAUDE_CODE_SIMPLE",)  # documented to stop the saved login from being read
-# child_env(cfg, **extra): as today, and every name in CHILD_ENV_DROPPED is removed, whatever cfg["auth"] is.
+# manifest_check.py
+REF_TOKEN_RE  # matches "path:start" or "path:start-end", path = one or more of [\w./-]
+def reference_candidate(token):
+    """True when token is path:start[-end] and its path holds "/" or "." or names an existing file under ROOT."""
+def table_cells(line):  # unchanged signature; "\|" outside backticks is kept in the cell as "\|"
 
-# .claude/bin/launch.py  (WP-03)
-def _auth_status(argv, cfg):
-    """(returncode, parsed JSON object) of `<cli> auth status --json` with child_env(cfg); (None, None) when it cannot
-    run or times out; the object is None when stdout is not a JSON object."""
-# require_cli: logged out = a JSON object AND (returncode == 1 or authMethod == "none" or loggedIn is False) -> die(1).
-#   The message names the binary, `auth login`, '"auth": "inherit"', and the inherited variables: the names in
-#   child_env(cfg) that start with CLAUDE_ or ANTHROPIC_, sorted, at most 10 then "and N more". No values.
-#   It never says Claude Desktop's sign-in is not shared.
-#   No JSON object -> the warning, and it goes on. Anything else -> logged in.
-# The missing-CLI message keeps its first sentences and ends with exactly: "Claude Desktop bundles its own CLI but
-#   does not put it on the PATH: point AGENTIC_CLAUDE at it." (no claim about its sign-in).
+# installer.py: install_write(target, prep, dry_run) also deletes target/.claude/state/upgrade/<rel>
+# for every rel whose plan kind is "new", "updated" or "unchanged" (never in a dry run). No new public name.
 
-# .claude/bin/testutil.py  (WP-03): FAKE_AUTH="out" prints {"authMethod": "none"} and exits 1; "in" (default) prints
-#   {"loggedIn": true, "authMethod": "fake"}, exit 0; "none" as today.
+# doctor.py
+def kept_copies():
+    """(stale, live): sorted relative paths (posix, relative to UPGRADE_DIR) of the files under UPGRADE_DIR.
+    Stale: ROOT/<rel> missing, <rel> not in record["files"], or content_hash(ROOT/<rel>) == record["files"][<rel>].
+    Without a readable record every copy is live."""
+def remove_stale_copies():  # deletes the stale ones; REPAIRS["upgrade-stale"]
+# findings: {"code": "upgrade-stale", "severity": "auto",
+#            "message": "N kept version(s) in .claude/state/upgrade/ are obsolete: the installed file is no longer edited",
+#            "fix": "delete them"}  placed just before "upgrade-pending", which now counts only live copies.
+
+# launch.py
+NETWORK_TIMEOUT_S = 10
+DEFAULT_API_URL = "https://api.anthropic.com"
+PROXY_VARS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy",
+              "NO_PROXY", "no_proxy")
+def _api_url(env):        # env.get("ANTHROPIC_BASE_URL") or DEFAULT_API_URL
+def _reachable(url, env, opener=None):
+    """A HEAD request to url within NETWORK_TIMEOUT_S, through the proxies named in env. Result by outcome:
+      - any HTTP answer (HTTPError included) other than 407   -> (True, "")
+      - HTTPError 407                                          -> (False, "proxy asks for credentials (407)")
+      - URLError/OSError whose text holds "Tunnel connection failed: 407" (an https URL through HTTPS_PROXY)
+                                                               -> (False, "proxy asks for credentials (407)")
+      - ssl.SSLError or ssl.CertificateError (also as a URLError's reason): a TLS peer answered; Python may lack the
+        proxy's CA that the Node CLI gets from NODE_EXTRA_CA_CERTS   -> (True, "")
+      - socket.gaierror (also as a URLError's reason)          -> (False, "name not resolved")
+      - ConnectionRefusedError                                 -> (False, "connection refused")
+      - socket.timeout / TimeoutError                          -> (False, "timed out")
+      - any other URLError, OSError or http.client.HTTPException -> (False, "connection failed")
+    A URLError's reason is unwrapped first and classified by the rows above (a real closed port raises
+    URLError(ConnectionRefusedError)). reason never holds a URL or a credential. The opener is called as
+    opener(request, timeout=NETWORK_TIMEOUT_S); it defaults to build_opener(ProxyHandler(proxies)).open with
+    proxies from env: https from https_proxy/HTTPS_PROXY, http from http_proxy/HTTP_PROXY, each falling back to
+    all_proxy/ALL_PROXY when unset (ProxyHandler has no "all" key)."""
+def _proxy_names(env):    # "HTTPS_PROXY, NO_PROXY" (names set in env, in PROXY_VARS order) or "none"
+# require_cli(cfg): after the login check, when status.get("apiProvider") == "firstParty":
+#   ok, reason = _reachable(_api_url(env), env); if not ok: die(message)
+#   message names: the host of the URL (never the full URL), the reason, the word "proxy", _proxy_names(env), and
+#   "ANTHROPIC_BASE_URL" when that variable is set in env; it never contains a proxy variable's value.
+
+# core.py
+SESSION_WINDOW_S = 600  # sessions-check: another session's hook call newer than this blocks /implement
+
+# guardrail.py
+def record_hook_seen(data):  # unchanged signature; also writes "session_id" and "sessions" (section 5)
+def sessions_check():
+    """Inside a Claude tool call (CLAUDECODE): the own session is CLAUDE_CODE_SESSION_ID when set, else the
+    heartbeat's "session_id". 3 when "sessions" holds another id with a time within SESSION_WINDOW_S of now, else 0.
+    Outside a call, or with no own session id: 0, mode "not checked". Prints one JSON line (section 5); on 3 the
+    explanation goes to stderr."""
+def sessions_check(ignore=()):
+    """As above; ignore holds 8-character id prefixes the user confirmed closed. Matching entries are removed from
+    "sessions" in the heartbeat (one locked_json write) and do not count. Inside a call only."""
+
+# agentic.py: "sessions-check [--ignore ID]..." -> cmd_sessions_check(args) -> sessions_check(ignore)
+#   any other argument, or --ignore without an ID: die("Uso: sessions-check [--ignore ID]...")
 ```
+Exit codes: `sessions-check` 0 or 3. `require_cli`'s network failure exits 1, through `die`.
 
 ## 7. Conventions
-- **Python 3.9.** No `X | None` or `list[...]` in runtime annotations; types go in docstrings, as `.claude/bin` does. This overrides the Python rules' "type annotations on every public signature" for this repository.
+- **Python 3.9.** No `X | None` or `list[...]` in runtime annotations; types go in docstrings, as `.claude/bin` does. This overrides the Python rules' annotation rule for this repository.
 - **The ratchet:** functions of 60 lines or fewer (100 in tests), nesting of 4 or fewer, lines of 120 characters or fewer, files of 800 lines or fewer.
-- **Windows paths** are built with `ntpath`, so the logic runs and is tested on Linux. Tests inject `is_windows=True` with fake `which` and `exists` instead of patching the OS.
-- **Messages** name the file, the command or the variable to change. Never print a variable's value.
-- **Never raise** where a file, the environment or git is read: `OSError`, `ValueError`, `subprocess.SubprocessError`, and `AttributeError` or `TypeError` on a JSON object of the wrong shape.
-- **No personal paths in tests.** Use fake Windows paths such as `%LOCALAPPDATA%\Programs\Git`.
+- **Never print a variable's value**, above all a proxy URL, which may carry credentials. Name variables only.
+- **Never raise** where a file, the environment, git or the network is read: catch `OSError`, `ValueError`, `urllib.error.URLError`, `http.client.HTTPException` and `socket.timeout`, and turn them into a result.
+- **Tests never reach the real network.** Network tests use an injected opener, or a local `http.server` on `127.0.0.1`, or a closed local port, and remove every `PROXY_VARS` name from the environment they pass (`test_agentic.Repo` copies `os.environ`, `test_agentic.py:54`).
+- **No personal paths in tests or docs.**
+- **Messages** name the command, file or variable to change.
 
 ## 8. Work packages and acceptance criteria
 ### Acceptance criteria
-- AC-001 · A failed live check carries the diagnosis
-  - Scenario: a temporary project (`Repo`) with the flow's settings and no heartbeat. `PATH` holds a fake `python3` and git; `HOME` and `USERPROFILE` point to a temporary folder.
-  - Action: `hooks-check` with `CLAUDECODE=1`.
+- AC-001 · An annex reaches every brief
+  - Scenario: a plan with sections 1-11 and two annexes: `## Annex A · Catalogue` after section 10, holding `ANNEX-A-ROW`, and `## Anexo B` after section 8, holding `ANNEX-B-ROW`; a fenced block in section 6 holds the line `## Annex Z`.
+  - Action: `brief.slice_architecture(text, "WP-01", manifest)` and `brief.slice_architecture(text, "AT", manifest)`.
+  - Expected: both briefs are sliced (second value `True`) and contain `ANNEX-A-ROW` and `ANNEX-B-ROW`. The WP brief still lacks section 10's text. `split(text)` has exactly two `annex` parts, keyed `Annex A · Catalogue` and `Anexo B`, and `"".join` of every part's lines equals the text.
+  - Must not: drop an annex; take the fenced `## Annex Z` for a heading; change a brief of a plan without annexes.
+  - Check: `test_acceptance_v217.py`, `AnnexTests`.
+  - WP: WP-01
+- AC-002 · References to dotfiles and files without an extension
+  - Scenario: this repository (it has `.gitignore` and `.claude/bin/agentic.py`); section 4b texts built in the test.
+  - Action: `manifest_check.provenance_problems(text)`.
   - Expected:
-    - exit 3;
-    - `diagnosis` has the keys of the first version plus `git_bash`: `null` when `compat.IS_WINDOWS` is false; on Windows (the CI's `windows-latest` runner) a dict with the five keys of section 5;
-    - stderr still says "did not run for this call" and lists hints as `- ` lines.
-  - Must not: a `diagnosis` in a passing or static check, or a traceback.
-  - Check: `test_acceptance_v216.py::DiagnosisTests`
-  - WP: WP-01
-- AC-002 · A heartbeat under the main checkout of a worktree is found
-  - Scenario, action and expected: as in the first version (a real `git worktree`, a fresh heartbeat in the main checkout, `hooks-check` run inside the worktree).
-  - Must not: `ok: true`.
-  - Check: `DiagnosisTests`
-  - WP: WP-01
-- AC-003 · python3, settings and the "/hooks" fallback in the hints
-  - Scenario, action and expected: as in the first version (no `python3`, a `WindowsApps` `python3`, `disableAllHooks`, a settings file of the wrong shape; with no cause, the only hint is "/hooks").
-  - Must not: the "/hooks" hint beside another one.
-  - Check: `DiagnosisTests`
-  - WP: WP-01
-- AC-004 · Git Bash state on Windows
-  - Scenario: `git_bash_state(is_windows=True, environ=…, settings_envs=…, which=…, exists=…)` with fakes, in five cases:
-    1. `which("git")` = `%LOCALAPPDATA%\Programs\Git\cmd\git.exe`, that Git's `bin\bash.exe` exists, nothing configured, no default;
-    2. the same, with `environ={"CLAUDE_CODE_GIT_BASH_PATH": "D:\\Git\\bin\\bash.exe"}`;
-    3. the same, with `settings_envs=[{}, {"CLAUDE_CODE_GIT_BASH_PATH": "D:\\x.exe"}]`;
-    4. `C:\Program Files\Git\bin\bash.exe` exists;
-    5. no git on PATH and nothing exists.
-  - Expected:
-    1. `needs_path` true, `derived` = `%LOCALAPPDATA%\Programs\Git\bin\bash.exe`;
-    2. `configured` = `D:\Git\bin\bash.exe`, `needs_path` false;
-    3. `configured` = `D:\x.exe`;
-    4. `default` set, `needs_path` false and `missing` false;
-    5. `missing` true.
-
-    With `is_windows=False` the result is `None`. A `git.exe` under `<root>\mingw64\bin\` gives `<root>\bin\bash.exe`.
-  - Must not: raise on a settings env that is not an object.
-  - Check: `GitBashTests`
-  - WP: WP-01
-- AC-005 · The diagnosis puts Git Bash first
-  - Scenario: `guardrail._hints(d)` with `d = {"python3": "C:\\Python312\\python.exe", "settings": [{"path": "s", "exists": True, "declares_hook": True, "disable_all_hooks": False}], "heartbeats": [{"path": "h", "exists": False, "age_s": None}], "git_bash": <state>}`, with the state of case 1 of AC-004, then of case 5.
-  - Expected:
-    - case 1: the first hint contains "Git Bash", the derived path and "doctor --fix", and no "/hooks" hint follows;
-    - case 5: a hint contains "Git Bash was not found".
-  - Must not: a Git Bash hint when `d["git_bash"]` is None.
-  - Check: `GitBashTests`
-  - WP: WP-01
-- AC-006 · doctor reports and fixes Git Bash
-  - Scenario:
-    - `doctor.git_bash_finding(state)` for the states of AC-004 cases 1, 2, 4 and 5, and for None;
-    - `doctor.write_git_bash_path(path, bash)` on four files: a missing file, a `settings.local.json` that holds `{"permissions": {"allow": ["Bash(x)"]}}`, one whose `env` holds another key, and a file that is a JSON list.
-  - Expected:
-    - findings: case 1 is `auto` with the derived path in its message and "settings.local.json" in its fix; cases 2 and 4 give None; case 5 is a `mention`; None gives None;
-    - writes: the file ends with `env.CLAUDE_CODE_GIT_BASH_PATH` set and every other key kept, and the list file raises `ValueError` and is unchanged;
-    - `agentic.py doctor` in a temporary `Repo` has no `git-bash` finding when `compat.IS_WINDOWS` is false (on Windows CI, where Git is under Program Files, `default` is set and there is no finding either: assert that only when `git_bash_state()["default"]` is set, else skip).
-    - `report(fix=True, git_bash=…)` with `SETTINGS_LOCAL` pointing at a file that is a JSON list returns without raising, `fixed` empty and the finding still listed.
-  - Must not: `write_git_bash_path` dropping `permissions` or another `env` key.
-  - Check: `DoctorGitBashTests`
+    - a `read` row citing `` `.gitignore:1-2` `` has no error;
+    - `` `.gitignore:1-99999` `` gives `section 4b, row 1: .gitignore:1-99999 does not exist or is out of range`;
+    - a row citing only `` `localhost:8080` `` gives `section 4b, row 1: read needs a file:line`;
+    - `reference_candidate("Makefile:1")` is `False` here, where no `Makefile` exists, and `True` when the test writes a file without an extension at the root (in a temporary `ROOT`).
+  - Must not: accept a missing dotfile; treat `localhost:8080` as a file reference.
+  - Check: `test_acceptance_v217.py`, `ReferenceTests`.
   - WP: WP-02
-- AC-007 · The agents lose CLAUDE_CODE_SIMPLE and nothing else
-  - Scenario: an environment with `CLAUDE_CODE_SIMPLE=1`, `CLAUDE_CODE_SESSION_ID=s`, `ANTHROPIC_BASE_URL=u` and `HTTPS_PROXY=p`.
-  - Action: `core.child_env({"auth": "subscription"})` and `core.child_env({"auth": "inherit"})`.
-  - Expected: neither result has `CLAUDE_CODE_SIMPLE`; both keep `CLAUDE_CODE_SESSION_ID`, `ANTHROPIC_BASE_URL` and `HTTPS_PROXY`.
-  - Must not: any other variable removed, apart from the API keys under `subscription`, as today.
-  - Check: `CliTests`
+- AC-003 · An escaped pipe stays in its cell
+  - Scenario: the row ``| a \| b | `x` | read |``.
+  - Action: `manifest_check.table_cells(row)`.
+  - Expected: `["a \\| b", "`x`", "read"]` (three cells). The existing ``| a | `x | y` | read |`` still gives three cells.
+  - Must not: split on `\|`.
+  - Check: `test_acceptance_v217.py`, `ReferenceTests`.
+  - WP: WP-02
+- AC-004 · Install deletes kept copies it does not need
+  - Scenario: an installed target (as in `InstalledCopyTests`) in which:
+    - `.claude/state/upgrade/.claude/agents/qa.md` exists while `.claude/agents/qa.md` is intact;
+    - `.claude/agents/reviewer.md` is edited and committed.
+  - Action: run `install` again from the source.
+  - Expected:
+    - the qa copy is gone;
+    - `.claude/state/upgrade/.claude/agents/reviewer.md` exists and holds the source's version;
+    - `install --dry-run` deletes nothing.
+  - Must not: delete the kept copy of an edited file; delete anything in a dry run.
+  - Check: `test_acceptance_v217.py`, `KeptCopyTests`.
   - WP: WP-03
-- AC-008 · The CLI check before the fallback
-  - Scenario, action and expected: as in the first version.
-    - A missing CLI: `run-wave 1`, `run-pipeline` and `run-wave 1 WP-01 --fix` each exit 1 before any state.
-    - `FAKE_AUTH=out`, which now prints `{"authMethod": "none"}` and exits 1: exit 1, one `auth.log` line, no agent.
-    - `FAKE_AUTH=none`: one warning, and the agents run.
-    - One auth call per run, with the API key stripped.
-  - Also: the logged-out stderr lists `ANTHROPIC_AAA_FAKE_INHERITED` when the test sets that variable (its name sorts before every other `ANTHROPIC_*` and `CLAUDE_*`, so the cap of 10 never hides it, whatever the host sets), and never contains its value. It does not contain "not signed in" or "not shared".
-  - Must not: a value printed, or an agent started when logged out.
-  - Check: `CliTests`
+- AC-005 · doctor tells stale kept copies from live ones and fixes them
+  - Scenario: an installed target whose `.claude/state/upgrade/` holds:
+    - a copy of an intact file, `qa.md` (stale);
+    - a copy of an edited file, `reviewer.md` (live);
+    - a copy of a path the record does not know (stale).
+  - Action: `agentic.py doctor`, then `agentic.py doctor --fix`.
+  - Expected:
+    - `doctor`: one `upgrade-stale` finding (`auto`), whose message starts with `2 kept version(s)`, and an `upgrade-pending` finding whose message starts with `1 new version(s)`;
+    - `doctor --fix`: `"fixed": ["upgrade-stale"]`, the two stale files are gone and the live one remains;
+    - the second report has no `upgrade-stale`.
+  - Must not: delete the live copy; write anything in `doctor` without `--fix`.
+  - Check: `test_acceptance_v217.py`, `KeptCopyTests`.
   - WP: WP-03
-- AC-009 · The docs say how to fix Git Bash and point the fallback at a CLI
-  - Scenario: the checkout.
+- AC-006 · The fallback stops when the API cannot be reached
+  - Scenario: a project with the fake `claude`, every name of `PROXY_VARS` removed from the environment first (the host's own proxy must not take part), then `FAKE_PROVIDER=firstParty`, `ANTHROPIC_BASE_URL=http://127.0.0.1:<a port just closed>` and `HTTPS_PROXY=http://user:s3cret@127.0.0.1:<closed port>`.
+  - Action: `agentic.py run-acceptance`.
+  - Expected:
+    - exit code 1;
+    - stderr names `127.0.0.1`, the word `proxy` and the variable names `HTTPS_PROXY` and `ANTHROPIC_BASE_URL`;
+    - the fake's log has `auth.log` and no agent call (`call-*.json`);
+    - nothing is created under `.claude/state/runs/`.
+  - Must not: print `s3cret` or the proxy URL; launch an agent.
+  - Check: `test_acceptance_v217.py`, `NetworkTests`.
+  - WP: WP-04
+- AC-007 · The network check passes on any answer and is skipped off the first-party API
+  - Scenario: a local `http.server` on `127.0.0.1` that answers 404 to everything.
+  - Action and expected, in-process with `launch._reachable` and `launch.require_cli` (subprocess and opener patched):
+    - `_reachable("http://127.0.0.1:<port>", {})` is `(True, "")`;
+    - an opener raising a `URLError` whose reason is a `socket.gaierror` gives `(False, "name not resolved")`;
+    - an `HTTPError` 407, and a `URLError(OSError("Tunnel connection failed: 407 Proxy Authentication Required"))`, both give `(False, "proxy asks for credentials (407)")`;
+    - a `URLError` whose reason is an `ssl.SSLError` (certificate verify failed) gives `(True, "")`;
+    - `ConnectionRefusedError`, `socket.timeout` and a plain `OSError("x")` give `connection refused`, `timed out` and `connection failed`;
+    - `require_cli` with `apiProvider` `"bedrock"` or absent never calls `launch._reachable` (the tests patch `launch._reachable`, the only seam, since `require_cli` passes no opener);
+    - `_reachable` with an opener raising `URLError(ConnectionRefusedError())` gives `connection refused`.
+  - Must not: treat a 401, 403 or 404 as unreachable; stop on a certificate error; check under Bedrock or Vertex.
+  - Check: `test_acceptance_v217.py`, `NetworkTests`.
+  - WP: WP-04
+- AC-008 · The hook records main-thread sessions only
+  - Scenario: a temporary repo with the flow's hook.
+  - Action: `agentic.py hook` with these payloads:
+    - `{"session_id": "s-main", "tool_name": "Bash", "tool_input": {"command": "ls"}}`;
+    - one with `"agent_type": "implementer"` and `"session_id": "s-agent"`;
+    - one with `AGENTIC_WP=WP-01` and `"session_id": "s-wp"`;
+    - one without `session_id`.
+  - Expected:
+    - `hook-seen.json`'s `sessions` holds `s-main` only;
+    - its `session_id` is that of the last payload that carried one;
+    - an entry older than 600 s, written there beforehand, is gone after the next main-thread call.
+  - Must not: record agent sessions; fail or block when `session_id` is missing.
+  - Check: `test_acceptance_v217.py`, `SessionTests`.
+  - WP: WP-05
+- AC-009 · sessions-check refuses when another session is active
+  - Scenario: `hook-seen.json` with `session_id` `"me-000000"` and `sessions` `{"me-000000": now, "other-11111": now - 120}`; `CLAUDE_CODE_SESSION_ID` removed from the environment unless a case sets it.
+  - Action: `agentic.py sessions-check` with `CLAUDECODE=1`.
+  - Expected:
+    - exit 3, JSON `ok` false and `others` `[{"session": "other-11", "age_s": 120±5}]`;
+    - stderr says `git worktree`;
+    - with `other-11111` at `now - 700` the exit is 0 and `others` is `[]`;
+    - with `CLAUDE_CODE_SESSION_ID=other-11111` the own session is `other-11111`, so `me-000000` (age 0) is the other one and the exit is 3;
+    - without `CLAUDECODE`, or with neither `CLAUDE_CODE_SESSION_ID` nor `session_id`, the exit is 0 with mode `"not checked"`.
+  - Must not: count the own session; refuse outside a Claude call.
+  - Check: `test_acceptance_v217.py`, `SessionTests`.
+  - WP: WP-05
+- AC-012 · A closed session can be let through
+  - Scenario: as AC-009, with `other-11111` at `now - 120`, `CLAUDE_CODE_SESSION_ID` removed and `CLAUDECODE=1`.
+  - Action: `agentic.py sessions-check --ignore other-11`, then `agentic.py sessions-check`.
+  - Expected:
+    - the first exits 0 with `others` `[]`;
+    - `hook-seen.json`'s `sessions` no longer holds `other-11111`;
+    - the second exits 0;
+    - `sessions-check --ignore` (no ID) and `sessions-check --bogus` exit 1 with `Uso: sessions-check`.
+  - Must not: forget a session whose prefix was not given; pass without the user's ids.
+  - Check: `test_acceptance_v217.py`, `SessionTests`.
+  - WP: WP-05
+- AC-010 · The docs say how
+  - Scenario: the repository.
   - Action: read the files.
   - Expected:
-    - `.claude/commands/implement.md` names `doctor --fix`, `CLAUDE_CODE_GIT_BASH_PATH`, `AGENTIC_CLAUDE` and `diagnosis`, and its fallback section says the inherited `CLAUDE_*`/`ANTHROPIC_*` variables are listed when a CLI reports no login;
-    - `docs/how-to/README.md` names `CLAUDE_CODE_GIT_BASH_PATH` and `AGENTIC_CLAUDE`, and has 260 lines or fewer;
-    - `docs/how-it-works.md` names `git_bash` or "Git Bash", `diagnosis` and `auth status`.
-  - Must not: any of those files saying Claude Desktop's sign-in is not shared ("not shared", "not signed in").
-  - Check: `DocsTests`
-  - WP: WP-04
-- AC-010 · Release 2.16.0
-  - Scenario: the checkout.
-  - Action: read `plugin.json`, `upgrade.NOTES` and the test files.
+    - `.claude/commands/implement.md` runs `agentic.py sessions-check` in its pre-flight; on exit 3 it asks the user whether the listed sessions are closed, reruns with `--ignore` if so, and otherwise stops and recommends a git worktree;
+    - `.claude/commands/architect.md` says that an unnumbered `## ` heading is an annex every brief keeps;
+    - `docs/how-to/README.md` names `sessions-check` and is at most 260 lines;
+    - `docs/how-it-works.md` names `sessions-check` and the network check.
+  - Must not: exceed the hub's line cap.
+  - Check: `test_acceptance_v217.py`, `DocsTests`.
+  - WP: WP-06
+- AC-011 · Release 2.17.0
+  - Scenario: the repository.
+  - Action: read `plugin.json`, `upgrade.NOTES` and `.claude/bin`.
   - Expected:
-    - version `2.16.0`;
-    - `NOTES["2.16.0"]` has at least three entries: one with `hooks-check`, one with `doctor --fix` and `CLAUDE_CODE_GIT_BASH_PATH`, and one with `auth status` and `CLAUDE_CODE_SIMPLE`;
-    - the only acceptance file is `test_acceptance_v216.py`;
-    - `test_runner_reports.py` holds v215's nine classes.
-  - Must not: two acceptance files of releases at once.
-  - Check: `ReleaseTests`
-  - WP: WP-04
-
-- AC-011 · The dead-hook message names Git Bash
-  - Scenario: `guardrail.HOOKS_DEAD_MSG`.
-  - Action: read it.
-  - Expected: it contains "Git Bash", "doctor --fix", "python3" and "worktree", and still "did not run for this call" and `/implement fallback`.
-  - Must not: lose any of the causes it named before.
-  - Check: `DiagnosisTests`
-  - WP: WP-01
+    - version `2.17.0`;
+    - `NOTES["2.17.0"]` has at least 4 entries, naming `annex`, `sessions-check`, `upgrade-stale` and `proxy`;
+    - the only acceptance file is `test_acceptance_v217.py`;
+    - `test_hook_diagnosis.py` defines `DiagnosisTests`, `GitBashTests`, `DoctorGitBashTests`, `CliTests` and `DocsTests`.
+  - Must not: keep `test_acceptance_v216.py`.
+  - Check: `test_acceptance_v217.py`, `ReleaseTests`.
+  - WP: WP-06
 
 ### Work packages
-
-#### WP-01 · Git Bash in the hook diagnosis
+#### WP-01 · Briefs keep annexes
 - Wave 1.
-- Files: `.claude/bin/guardrail.py`, `.claude/bin/test_guardrail.py`.
-- Implements: `DEFAULT_GIT_BASH`, `git_bash_state`, the `git_bash` key of `hook_diagnosis`, the two hints of section 6, and "Git Bash not found" in `HOOKS_DEAD_MSG`. The rest of the diagnosis stays as built.
-- ACs: AC-001, AC-002, AC-003, AC-004, AC-005, AC-011.
-- **Patterns to mirror:**
-  - `guardrail.py:349-442`: the helpers' style;
-  - `guardrail.py:417-431`: the hint order;
-  - `test_guardrail.py:350-384`: the diagnosis unit tests.
+- Files: `.claude/bin/brief.py`, `.claude/bin/test_brief.py`.
+- Contracts: implements `split` and `slice_architecture` (section 6).
+- ACs: AC-001.
+- **Patterns to mirror:** `brief.py:10-28` (the fence toggle and the parts list) and `test_brief.py:36-60`.
 - **Gotchas:**
-  - Use `ntpath.dirname`, `ntpath.basename` and `ntpath.join`. The `git.exe` path from `which` has backslashes even in the fakes.
-  - Compare folder names case-insensitively (`Cmd`, `BIN`).
-  - Settings `env` values that are not non-empty strings are ignored.
-  - Split `_settings_entries()` (`guardrail.py:367-375`) into `_settings_data()` returning `[(path, parsed or None), ...]` for the three files, used by both `_settings_entries()` and the default `settings_envs` of `git_bash_state` (each parsed object's `env` when it is a dict).
-  - `guardrail.py` is at 485 lines; stay under 800.
-- **Imports:** `ntpath`, `os`, `shutil`; `compat.IS_WINDOWS`.
-- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_guardrail.py"`, `python3 .claude/bin/agentic.py quality`.
+  - A `## ` heading inside section 8 currently ends up inside a subsection. Splitting it out as an annex must not break `section_eight`, which receives only section 8's own lines.
+  - `### ` and `#### ` are not annexes.
+  - The preamble's `# Architecture:` line is `# `, not `## `.
+- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_brief.py"`, `python3 -m unittest discover -s .claude/bin -p "test_manifest_check.py"`.
 
-#### WP-02 · doctor finds and writes the Git Bash path
-- Wave 2, after WP-01: it imports `git_bash_state`, and `doctor.py` would not import without it.
-- Files: `.claude/bin/doctor.py`, `.claude/bin/test_doctor.py`.
-- Implements: `SETTINGS_LOCAL`, `git_bash_finding`, `write_git_bash_path`, the `git-bash` finding appended last in `diagnose()`, and its repair inside `repair()` (section 6).
-- ACs: AC-006.
-- **Patterns to mirror:**
-  - `doctor.py:22-28`: the finding builders;
-  - `doctor.py:75-104`: the order in `diagnose`;
-  - `doctor.py:106-130`: repairs;
-  - `installer.py:127-141`: merging into `settings.local.json`;
-  - `test_doctor.py:37-60`.
-- **Gotchas:**
-  - The repair calls `git_bash()` to get the derived path; the finding's text is not parsed. Tests patch `doctor.SETTINGS_LOCAL` to a temporary file and pass `git_bash`: they never touch the real checkout's settings.
-  - `report()` re-diagnoses after repairing, and the env written goes into a settings file that `git_bash_state` reads, so after `--fix` the finding is gone. A test should show that with injected inputs.
-  - `.claude/settings.local.json` may hold permissions written by `sync-permissions`: keep them.
-- **Imports:** `from guardrail import git_bash_state`.
-- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_doctor.py"`, `python3 .claude/bin/agentic.py quality`.
-
-#### WP-03 · The agents' environment and the login check
+#### WP-02 · validate references and cells
 - Wave 1.
-- Files: `.claude/bin/core.py`, `.claude/bin/launch.py`, `.claude/bin/testutil.py`, `.claude/bin/test_launcher.py`.
-- Implements: `CHILD_ENV_DROPPED` and its use in `child_env`; `_auth_status` returning `(returncode, data)`; the logged-out rule and message of section 6; the fake's new `out` answer.
-- ACs: AC-007, AC-008.
-- **Patterns to mirror:**
-  - `core.py:321-326`;
-  - `launch.py:49-92`;
-  - `testutil.py:51-70`;
-  - `test_launcher.py` `RequireCliTests` and `CliBeforeStateTests`.
+- Files: `.claude/bin/manifest_check.py`, `.claude/bin/test_manifest_check.py`.
+- Contracts: implements `REF_TOKEN_RE`, `reference_candidate` and `table_cells`.
+- ACs: AC-002, AC-003.
+- **Patterns to mirror:** `manifest_check.py:393-430` and `test_manifest_check.py:125-153`.
 - **Gotchas:**
-  - `child_env` is used for every agent: change only the drop list.
-  - The message's variable names come from `child_env(cfg)`, after the drop.
-  - In this cloud environment dozens of `CLAUDE_*` names are set: the cap of 10 keeps the message short.
-  - Keep the memo, the warning text and the state-free order (before snapshot, ledger and briefs).
-- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_launcher.py"`, `... -p "test_agentic.py"`, `... -p "test_fix_cycles.py"`, `python3 .claude/bin/agentic.py quality`.
+  - `row_problem` filters tokens through the regex today. Use `reference_candidate` instead.
+  - The existence test for a path without `/` or `.` uses `ROOT`, which tests can patch (`mock.patch.object(manifest_check, "ROOT", tmp)`).
+  - `\|` inside backticks stays as it is too.
+- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_manifest_check.py"`.
 
-#### WP-04 · Docs and release notes
+#### WP-03 · Stale kept copies
 - Wave 1.
-- Files: `.claude/commands/implement.md`, `docs/how-to/README.md`, `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/bin/test_runner_reports.py`.
-- ACs: AC-009, AC-010.
-- **Patterns to mirror:**
-  - `.claude/commands/implement.md:13-20` and `.claude/commands/implement.md:74-80`;
-  - `docs/how-to/README.md:20-30`;
-  - `upgrade.py:156-170`.
+- Files: `.claude/bin/installer.py`, `.claude/bin/doctor.py`, `.claude/bin/test_install.py`, `.claude/bin/test_doctor.py`.
+- Contracts: the `install_write` cleanup; `kept_copies`, `remove_stale_copies` and the `upgrade-stale` finding.
+- ACs: AC-004, AC-005.
+- **Patterns to mirror:** `installer.py:212-230`, `doctor.py:104-179`, `test_install.py:292-332` and `test_doctor.py:39-60`.
 - **Gotchas:**
-  - The first version's text claims Claude Desktop's sign-in is not shared. Remove it everywhere: `implement.md`, the hub's line 25, the notes.
-  - The hub is at 260 lines: edit in place.
-  - In `implement.md` step 1, say that on Windows a failed `hooks-check` usually means Git Bash, and that `doctor --fix` fixes it.
-- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_runner_reports.py"`, `python3 .claude/bin/agentic.py docs-check`, `python3 -m unittest discover -s acceptance`, `python3 -m unittest discover -s qa`.
+  - `install_write` is shared by dry runs: no deletion when `dry_run`.
+  - Leave empty folders under `.claude/state/upgrade/`. `doctor` counts files only.
+  - The record's path is `ROOT / INSTALL_RECORD`.
+  - In the flow repo itself (`is_flow_repo`), `doctor` skips the record check; `kept_copies` may still run.
+  - `test_doctor.py:222-227` expects a copy `a.md` with an empty record to give only `upgrade-pending` and `ok` true. Under this design that copy is stale (not in the record): update the test so it expects `upgrade-stale`, `ok` false and exit code 3 (it asserts 0 today), and add a live copy for the `upgrade-pending` case.
+- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_install.py"`, `python3 -m unittest discover -s .claude/bin -p "test_doctor.py"`.
+
+#### WP-04 · Network pre-flight
+- Wave 1.
+- Files: `.claude/bin/launch.py`, `.claude/bin/testutil.py`, `.claude/bin/test_launcher.py`.
+- Contracts: `NETWORK_TIMEOUT_S`, `DEFAULT_API_URL`, `PROXY_VARS`, `_api_url`, `_reachable`, `_proxy_names`, and the `require_cli` step.
+- ACs: AC-006, AC-007.
+- **Patterns to mirror:** `launch.py:49-110`, `testutil.py:55-66` and `test_launcher.py:357-381`.
+- **Gotchas:**
+  - Build the opener with `urllib.request.build_opener(urllib.request.ProxyHandler(proxies))`.
+  - `proxies` comes from the env's `https_proxy`/`HTTPS_PROXY`, `http_proxy`/`HTTP_PROXY` and `all_proxy`/`ALL_PROXY` (lower case wins, as urllib does).
+  - When `urllib.request.proxy_bypass_environment(host, {"no": <NO_PROXY>})` says bypass, use `ProxyHandler({})`.
+  - Never use the process's own `os.environ` for this; use `child_env(cfg)`.
+  - `HTTPError` is a subclass of `URLError`: catch it first.
+  - The `die` message must not contain the URL of a proxy. `ANTHROPIC_BASE_URL` may be named as a variable but its value is shown only as its host.
+  - Keep `require_cli` under 60 lines: put the step in its own function.
+- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_launcher.py"`.
+
+#### WP-05 · A second session refuses /implement
+- Wave 1.
+- Files: `.claude/bin/core.py`, `.claude/bin/guardrail.py`, `.claude/bin/agentic.py`, `.claude/bin/test_guardrail.py`, `.claude/bin/test_definitions.py`.
+- Contracts: `SESSION_WINDOW_S`, `record_hook_seen`, `sessions_check` and `cmd_sessions_check`.
+- ACs: AC-008, AC-009, AC-012.
+- **Patterns to mirror:** `guardrail.py:314-333`, `guardrail.py:499-525`, `agentic.py:113-114`, `agentic.py:368-377` and `test_guardrail.py:44-67`.
+- **Gotchas:**
+  - The hook must never fail because of this. A missing or non-string `session_id` records nothing, and a `sessions` value that is not a dict starts again from `{}`.
+  - Main thread means no `agent_type` in the payload and `AGENTIC_WP` unset.
+  - `sessions_check` reads with `locked_json(HOOK_SEEN, lambda s: None)` only when the file exists, as `hooks_check` does.
+  - `test_definitions.py:504-507` pins the command table: every command must have a line in the `Subcommands:` docstring of `agentic.py` (add `  sessions-check` there), and the count goes from 36 to 37.
+  - `test_agentic.Repo` (`test_agentic.py:56`) strips `AGENTIC_WP` and `CLAUDECODE` but not `CLAUDE_CODE_SESSION_ID`: every test that runs `sessions-check` must remove it (or set it) itself, since the suite may run inside a real session.
+  - The own session is `CLAUDE_CODE_SESSION_ID` from the environment when it is set (Claude Code sets it in a tool call's shell; seen here), else the heartbeat's `session_id`. The environment is preferred because another session's hook call can overwrite the heartbeat between this call and the check.
+- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_guardrail.py"`, `python3 -m unittest discover -s .claude/bin -p "test_definitions.py"`.
+
+#### WP-06 · Docs, notes, release and the moved tests
+- Wave 2 (the docs name what WP-04 and WP-05 build).
+- Depends on: WP-01, WP-04, WP-05.
+- Files: `.claude/commands/implement.md`, `.claude/commands/architect.md`, `docs/how-to/README.md`, `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/bin/test_hook_diagnosis.py`, `.claude/bin/test_acceptance_v216.py`, `.claude/flow-history.json` (regenerated with `agentic.py flow-history` as the PR's last commit).
+- ACs: AC-010, AC-011.
+- **Patterns to mirror:** `implement.md:15-22`, `architect.md:119-190`, `upgrade.py:156-168` and `test_runner_reports.py:1-27`.
+- **Gotchas:**
+  - The hub is at 260 lines: edit the `hooks-check` line at 181 in place, so the line count does not grow.
+  - The moved file keeps the classes as they are, with a docstring saying where they came from. Its `DocsTests` reads this repo's docs: decorate it with `FLOW_REPO_ONLY` (`unittest.skipUnless(core.is_flow_repo(ROOT), ...)`), as `test_runner_reports.py:27` does.
+  - The guides may not cite flow version numbers (`acceptance/test_docs.py`).
+  - `implement.md:13` says `fallback` means "use the fallback mode without checking anything". Rewrite that line: `fallback` skips the workflow's availability check, while the pre-flight, `sessions-check` included, runs in both modes, because a second session breaks a fallback run the same way.
+  - `test_definitions.py:596-601` requires `hooks-check` to stay step 1: insert `sessions-check` as step 2 and do not reorder.
+- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_hook_diagnosis.py"`, `python3 .claude/bin/agentic.py docs-check`, `python3 -m unittest discover -s acceptance`, `python3 -m unittest discover -s qa`.
 
 ```json wp-manifest
 {
   "maintainer": true,
   "stack": ["python", "typescript"],
   "allow_bash": ["Bash(python3 -m unittest:*)", "Bash(node .claude/bin/test_workflow.mjs)"],
-  "acceptance": {"files": [".claude/bin/test_acceptance_v216.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_acceptance_v216.py"},
+  "acceptance": {"files": [".claude/bin/test_acceptance_v217.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_acceptance_v217.py"},
   "verify": {"build": "python3 -m unittest discover -s bench -p \"test_*.py\"", "lint": "node .claude/bin/test_workflow.mjs", "types": "python3 -m unittest discover -s bench/acceptance", "tests": "python3 -m unittest discover -s .claude/bin -p \"test_*.py\""},
   "docs": {"files": ["docs/assets/"], "codemap": null},
   "work_packages": [
-    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/guardrail.py", ".claude/bin/test_guardrail.py"],
-     "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-005", "AC-011"], "mirror": [".claude/bin/guardrail.py:349-442", ".claude/bin/test_guardrail.py:350-384"]},
-    {"id": "WP-02", "wave": 2, "depends_on": ["WP-01"], "files": [".claude/bin/doctor.py", ".claude/bin/test_doctor.py"],
-     "acs": ["AC-006"], "mirror": [".claude/bin/doctor.py:22-130", ".claude/bin/installer.py:127-141", ".claude/bin/test_doctor.py:37-60"]},
-    {"id": "WP-03", "wave": 1, "depends_on": [], "files": [".claude/bin/core.py", ".claude/bin/launch.py", ".claude/bin/testutil.py", ".claude/bin/test_launcher.py"],
-     "acs": ["AC-007", "AC-008"], "mirror": [".claude/bin/core.py:321-326", ".claude/bin/launch.py:49-92", ".claude/bin/testutil.py:51-70"]},
-    {"id": "WP-04", "wave": 1, "depends_on": [], "files": [".claude/commands/implement.md", "docs/how-to/README.md", "docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/bin/test_runner_reports.py"],
-     "acs": ["AC-009", "AC-010"], "mirror": [".claude/commands/implement.md:13-20", "docs/how-to/README.md:20-30", ".claude/bin/upgrade.py:156-170"]}
+    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/brief.py", ".claude/bin/test_brief.py"],
+     "acs": ["AC-001"], "mirror": [".claude/bin/brief.py:10-28", ".claude/bin/test_brief.py:36-60"]},
+    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/manifest_check.py", ".claude/bin/test_manifest_check.py"],
+     "acs": ["AC-002", "AC-003"], "mirror": [".claude/bin/manifest_check.py:393-430", ".claude/bin/test_manifest_check.py:125-153"]},
+    {"id": "WP-03", "wave": 1, "depends_on": [], "files": [".claude/bin/installer.py", ".claude/bin/doctor.py", ".claude/bin/test_install.py", ".claude/bin/test_doctor.py"],
+     "acs": ["AC-004", "AC-005"], "mirror": [".claude/bin/installer.py:212-230", ".claude/bin/doctor.py:104-179", ".claude/bin/test_install.py:292-332", ".claude/bin/test_doctor.py:39-60"]},
+    {"id": "WP-04", "wave": 1, "depends_on": [], "files": [".claude/bin/launch.py", ".claude/bin/testutil.py", ".claude/bin/test_launcher.py"],
+     "acs": ["AC-006", "AC-007"], "mirror": [".claude/bin/launch.py:49-110", ".claude/bin/testutil.py:55-66", ".claude/bin/test_launcher.py:357-381"]},
+    {"id": "WP-05", "wave": 1, "depends_on": [], "files": [".claude/bin/core.py", ".claude/bin/guardrail.py", ".claude/bin/agentic.py", ".claude/bin/test_guardrail.py", ".claude/bin/test_definitions.py"],
+     "acs": ["AC-008", "AC-009", "AC-012"], "mirror": [".claude/bin/guardrail.py:314-333", ".claude/bin/guardrail.py:499-525", ".claude/bin/agentic.py:368-377", ".claude/bin/test_guardrail.py:44-67"]},
+    {"id": "WP-06", "wave": 2, "depends_on": ["WP-01", "WP-04", "WP-05"], "files": [".claude/commands/implement.md", ".claude/commands/architect.md", "docs/how-to/README.md", "docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/bin/test_hook_diagnosis.py", ".claude/bin/test_acceptance_v216.py", ".claude/flow-history.json"],
+     "acs": ["AC-010", "AC-011"], "mirror": [".claude/commands/implement.md:15-22", ".claude/commands/architect.md:119-190", ".claude/bin/upgrade.py:156-168", ".claude/bin/test_runner_reports.py:1-27"]}
   ]
 }
 ```
 
 ## 9. Test strategy
-- **Unit:** each WP in its own test file, with stdlib `unittest`. Windows logic runs with `is_windows=True` and fake `which` and `exists`. doctor's write runs on temporary files.
-- **Acceptance:** `.claude/bin/test_acceptance_v216.py`, rewritten from AC-001 to AC-011 and red before the code.
-  - It keeps the first version's `DiagnosisTests` setup: `PATH` with a fake `python3` and git, and a temporary `HOME` and `USERPROFILE`.
-  - It adds `GitBashTests` and `DoctorGitBashTests` (in-process, injected inputs) and rewrites `CliTests` and `DocsTests`.
-  - Nothing is spent.
+- **Unit:** each WP adds tests to its own test file, with stdlib `unittest`.
+  - Network tests inject the opener or use a local `http.server` on `127.0.0.1`.
+  - Hook tests run `agentic.py hook` in a temporary `Repo`.
+- **Acceptance:** `.claude/bin/test_acceptance_v217.py`, written from AC-001 to AC-011 before the code. It must be red today for each AC: annexes dropped, `.gitignore:1-2` refused, `\|` split, copies kept, no network check, no `sessions`, no `sessions-check`, docs and release missing. Nothing is spent, and nothing reaches the network.
 - **QA, by hand:**
-  - all CI suites, including `acceptance/` and `qa/`;
+  - every CI suite, `quality`, `docs-check`;
+  - the installed-project run, as CI's `installed` job;
   - mutations, at least:
-    - the Git Bash hint dropped;
-    - mingw64 not handled;
-    - configured in settings ignored;
-    - the write dropping keys;
-    - `CLAUDE_CODE_SIMPLE` kept;
-    - another variable dropped;
-    - exit code 1 ignored;
-    - a value printed;
-  - the installed-project run as CI's `installed` job;
-  - a real `auth status` through `require_cli` here.
-
-Windows CI (`windows-latest`) runs the default branch for real: Git is under Program Files there, so `default` is set, with no Git Bash hint and no finding. The per-user case (`needs_path`) is only exercised with injected inputs. The next session on the field machine should run `doctor`, then `doctor --fix`, restart, and run `hooks-check`.
+    - annexes kept only in the WP brief;
+    - a fenced `## ` taken as an annex;
+    - `reference_candidate` without the existence check;
+    - `\|` split;
+    - the dry run deleting;
+    - stale and live swapped;
+    - a 404 treated as unreachable;
+    - the check run with `apiProvider` absent;
+    - agent sessions recorded;
+    - the own session counted;
+    - the window ignored;
+  - a real `auth status` through `require_cli` here, reaching the API through this container's proxy.
 
 ## 10. Decisions
 | Decision | Discarded | Why |
 |---|---|---|
-| `doctor --fix` writes `CLAUDE_CODE_GIT_BASH_PATH` into `.claude/settings.local.json` (user's choice) | Exec-form hook commands; diagnosis only | It is the documented route, it is per machine and never committed, it keeps today's hook commands, and a fallback CLI reads it too. Exec form changes every project, and its minimum Claude Code version is unknown. |
-| Detection: the variable (environment or settings), the two Program Files defaults, the `bash.exe` beside the `git.exe` on PATH | Copy Claude Code's own search | That search is not documented; these three cover the field case and the standard install. |
-| Drop only `CLAUDE_CODE_SIMPLE` from the agents' environment (user's choice) | Strip every `CLAUDE_*`/`ANTHROPIC_*`; touch nothing | It is the only inherited variable documented to stop the saved login. A full strip breaks environments whose authentication travels in variables, such as this cloud container. |
-| Logged out = JSON with exit 1, `authMethod: "none"` or `loggedIn: false` | `loggedIn` only | The docs specify the exit code and `authMethod`, not `loggedIn`. |
-| The logged-out message lists inherited variable names (at most 10) | Print them all, or print values | Names point at the cause; values may be secrets. |
-| No auto-detection of Claude Desktop's CLI | Search `%APPDATA%\Claude\claude-code\` | The user wants the native workflow; `AGENTIC_CLAUDE` covers the rest. |
-| The first version's code is kept and corrected | Start again | `hook_diagnosis`, `require_cli` and the docs were verified (13+1 mutations); only their claims and two rules change. |
+| Every unnumbered `## ` heading is an annex kept in every brief | Only annexes a criterion names | A name match is fragile (a catalogue cited as "the table below"); annexes are rare and short compared with the sections a brief already holds. |
+| Extensionless references count only when the file exists | Any `word:number` | `localhost:8080`, `step:3` and the like would turn into false "does not exist" errors. |
+| Delete kept copies in `install`, and let `doctor --fix` clean old ones | Only `doctor` | The root cause is in `install`; projects that already hold stale copies need the repair. |
+| Network check keyed on `apiProvider: "firstParty"` | An environment switch to turn it off in tests | The real CLI reports the provider (seen here); the fake does not, so no existing test reaches the network, and Bedrock or Vertex hosts are never guessed. |
+| Any HTTP answer but 407 means reachable | Require 2xx | The API answers 404 to a bare HEAD; reaching it is what matters. A 407 means the agents would fail at the proxy too. |
+| Stop with exit 1 on an unreachable API (user's choice) | Warn and go on | Every agent would fail one by one, as in the field report. |
+| `sessions-check` refuses at 10 minutes (user's choice), only from the `/implement` launcher | A lock file; `git worktree list`; a check inside the engines | The hook already sees every call with its `session_id`; a lock left by a crash would need cleanup; the workflow's gatekeeper is a subagent whose session id is not verified, so a check inside the run could refuse its own session. |
+| Only main-thread calls are recorded | Every call | Fallback agents are separate `claude -p` sessions and would look like other sessions right after a run. |
+| `test_acceptance_v216.py`'s classes move to `test_hook_diagnosis.py` | Delete them | They are the only end-to-end checks of the diagnosis and the login check. |
 
 ## 11. Risks and open questions
-- **The per-user Git case is not tested on a real Windows machine.** Windows CI covers only the default install. The detection and the written setting follow the docs and the field report, but whether Claude Code picks up `env.CLAUDE_CODE_GIT_BASH_PATH` from `settings.local.json` without a restart is not documented. The hint says to restart.
-- **Claude Code's own Git Bash search is not documented.** If it finds Git Bash some way this design does not check, doctor may suggest a path that is not needed. The written setting is harmless when it points at a real `bash.exe`.
-- **`CLAUDE_CODE_SIMPLE` may not be the field report's only culprit.** If a CLI still reports no login, the message lists the inherited names so the next step can be found.
-- **The logged-out JSON was not seen here.** This environment injects its credentials. The rule follows the documented exit code and `authMethod`.
-- **Archive and index by hand.** The maintainer replaces `docs/architecture/0023-hook-diagnosis-cli-check.md` with this version and updates its line in `docs/architecture/README.md` when the design is approved; no WP owns them. The root `README.md` needs no change.
-- **`verify` does not run `acceptance/`, `qa/`, `quality` or `docs-check`** (as in earlier designs, and its labels do not match the suites); QA runs them by hand.
-- **Expected failures until WP-04 and the last commit.** `flow-history --check` fails until the PR's last commit. `test_layout.py` passes already: the old acceptance file is gone.
+- **The session id of subagent calls is not verified.** This design does not depend on it: only main-thread calls are recorded, and `sessions-check` runs from the main thread. If the payload had no `session_id`, the check reports "not checked" and lets the run start.
+- **A restart or `/clear` changes the session id** (the restart is documented in step 1 of `/implement`; `/clear` is not verified). The previous id looks like another session for up to 10 minutes: the launcher asks the user and lets it through with `--ignore` (AC-012).
+- **A quiet second session is not seen.** A session that made no tool call in the last 10 minutes passes the check. The guard's git-state comparison during the run still stops a run that another session disturbs.
+- **The proxy behaviour of urllib** (`ProxyHandler`, `proxy_bypass_environment`) is not exercised against a real corporate proxy. The tests cover a closed port, a local server and injected errors. The field case (no proxy variables in a new terminal) shows up as a DNS or connect failure, which the check reports.
+- **`apiProvider` is undocumented output.** If a future CLI drops it, the check is skipped and the flow behaves as in 2.16.
+- **`verify` does not run `acceptance/`, `qa/`, `quality` or `docs-check`**, as in earlier designs; QA runs them by hand.
+- **Expected failures between wave 0 and WP-06.** Once `test_acceptance_v217.py` exists, `test_layout.py` (at most one acceptance file) and v216's `ReleaseTests` (line 426 pins the only acceptance file) fail until WP-06 deletes `test_acceptance_v216.py`. `verify` runs after wave 2, so this does not block.
+- **Expected failures until the last commit.** `flow-history --check` fails until WP-06 regenerates `.claude/flow-history.json` as the PR's last commit.
+- **The `verify` labels do not match their suites** (build = bench, lint = the node harness, types = bench/acceptance), as in earlier designs of this repo: the commands are right, the phase names in a report are not.
+- **Archive and index by hand.** On approval, the maintainer copies this file to `docs/architecture/0024-field-bug-fixes.md` and adds its line to `docs/architecture/README.md`; no WP owns them.
