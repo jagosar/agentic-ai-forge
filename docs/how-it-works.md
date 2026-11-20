@@ -236,6 +236,16 @@ The hook's Bash rules are regular expressions: they stop mistakes, not a determi
 
 **Changing the flow itself.** The agentic-flow repository is changed by hand: Claude Code does not let the agents the flow starts write under `.claude/`, where the flow lives. A plan for it carries `"maintainer": true`, which lets its packages own `.claude/` files except the never-owned ones (the settings, `.claude/state/`, `hook.py`, `waiting.py` and the quality baseline). `validate` accepts the flag only in the agentic-flow repository, and `pipeline-plan`, `run-pipeline` and every `run-*` command refuse such a plan before writing anything, so no agent is started for work it cannot do.
 
+**Is the guard running.** `/implement` starts with `hooks-check`: inside a session, the hook must have left a fresh heartbeat in `.claude/state/hook-seen.json`. When it has not, the check's JSON carries a `diagnosis`, and it prints one hint per line:
+- on Windows, whether Claude Code can find Git Bash (`git_bash`): without it hooks run in PowerShell and the hook command breaks, and `agentic.py doctor --fix` writes `CLAUDE_CODE_GIT_BASH_PATH` to `.claude/settings.local.json`;
+- the settings files that declare the hook, and any `disableAllHooks`;
+- the hook command;
+- the working directory, `CLAUDE_PROJECT_DIR` and the root;
+- a heartbeat left under the main checkout of a git worktree;
+- what `python3` resolves to: missing, or the Microsoft Store stub.
+
+The fallback engine first runs `<cli> auth status` once, with the agents' environment, which drops only `CLAUDE_CODE_SIMPLE`. A CLI that is missing or reports no login stops the run before any state, and the message lists the inherited `CLAUDE_*` and `ANTHROPIC_*` names (never their values).
+
 **Who failed.** When a phase or the acceptance run fails, `verify` names the packages that own what the failure mentions: their files, or their `AC-NNN` in a failing test's name. It reads only failing tests. With `reports` in the manifest (the JUnit or NUnit 2/3 XML a command writes, such as pytest's `--junitxml` or Pester's `-OutputFormat NUnitXml`), the failing tests come from the report, by name, and the baseline compares them by name too. Without it, the console is read without the lines of passing tests (`PASSED`, `[+]`, `✓`, `--- PASS`), and a runner's summary counts read as `N`. The stop gate reads the same way. A declared report is deleted before its command runs, so a stale one is never read, and close-stage never counts it as a change.
 
 **The clean-code ratchet.** With `.claude/quality-baseline.json` in the repo (install creates it from the code as it is), `baseline` and `verify` add a `quality` phase: function length and nesting (Python through `ast`, JavaScript/TypeScript through a heuristic scanner), file size and long lines may not get worse than the baseline, and new code must respect the limits. A failure names the file, so the package that owns it goes to a fix cycle. Only a person writes the baseline: `quality --update` lowers it, and agents can run neither `--init` nor `--update`.

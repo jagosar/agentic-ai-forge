@@ -22,7 +22,7 @@
 ## Requirements
 
 1. **A plan:** Pro, Max, Team or Enterprise (or a Console account). The free plan does not include Claude Code.
-2. **The Claude Code CLI.** The fallback mode needs it; with the native workflow it is recommended but optional. The desktop app and the VS Code extension ship their own Claude Code, but that does not put `claude` on your `PATH`. The recommended installer updates itself:
+2. **The Claude Code CLI.** The fallback mode needs it; with the native workflow it is recommended but optional. The desktop app and the VS Code extension ship their own Claude Code, but that does not put `claude` on your `PATH` (`AGENTIC_CLAUDE` can point at another CLI). On Windows with Git installed outside Program Files, run `agentic.py doctor --fix`: it writes `CLAUDE_CODE_GIT_BASH_PATH` so Claude Code runs the hooks in Git Bash. The recommended installer updates itself:
 
    ```bash
    curl -fsSL https://claude.ai/install.sh | bash
@@ -113,7 +113,7 @@ If a stage stops (a blocked package, a broken acceptance test), fix the cause an
 ### Two ways to run
 
 - **Native workflow (default).** `/implement` launches the `agentic-implement` workflow (`.claude/workflows/`), a Claude Code script that runs the whole pipeline deterministically in the background: agents in parallel, schema-validated reports and adversarial review. Follow it with `/workflows`. On Pro, enable **Dynamic workflows** in `/config`; the template already sets `"enableWorkflows": true`.
-- **Fallback mode.** Without workflows, `/implement` runs `agentic.py run-pipeline`: the same pipeline, with the same schemas, prompts and limits, starting one `claude -p` process per agent. It needs the `claude` CLI on the `PATH`. It is also the engine for CI.
+- **Fallback mode.** Without workflows, `/implement` runs `agentic.py run-pipeline`: the same pipeline, with the same schemas, prompts and limits, starting one `claude -p` process per agent. It needs the `claude` CLI on the `PATH`, or `AGENTIC_CLAUDE`, and checks its login once before the first agent. It is also the engine for CI.
 
 `/implement` picks automatically. To force the fallback: `/implement fallback`. Both are diagrammed in [How it works § 6](../how-it-works.md#6-native-workflow-and-fallback-mode).
 
@@ -209,7 +209,7 @@ python3 bench/bench.py ab --a <ref> --b <ref>          # compares two versions o
 |---|---|---|
 | `does not support this model; version X or newer is required` | An old CLI for a new model | `claude update`. With npm: `npm install -g @anthropic-ai/claude-code@latest` (with nvm, use nvm's npm) |
 | `Ignoring 1 permissions.allow entry ... not been trusted` | The folder is not trusted | Open `claude` in it once and accept the prompt |
-| `hooks-check` exits 3, or `GUARDRAIL HOOK SAW NO FLOW AGENT` | Claude Code does not run the project's hook here: a cloud session with several repositories, a thread inside a Claude project, or `disableAllHooks` | Use `/implement fallback`, or open a session with this repository alone |
+| `hooks-check` exits 3, or `GUARDRAIL HOOK SAW NO FLOW AGENT` | Claude Code does not run the project's hook here: a cloud session with several repositories, a thread inside a Claude project, `disableAllHooks`, Windows without Git Bash found (`CLAUDE_CODE_GIT_BASH_PATH`), `python3` missing for hooks, or a git worktree | Read the hints `hooks-check` prints (its JSON's `diagnosis`); on Windows run `agentic.py doctor --fix` and restart; or use `/implement fallback`, or open a session with this repository alone |
 | `Invalid manifest: ... model: sonnet` or `opus` | Someone pinned another model in an agent or command | Restore `model: sonnet` (working agents and `/implement`), `model: haiku` (only the `gatekeeper`) or `model: opus` (`/architect`, `plan-reviewer`) |
 | `File with two owners` | Two zones overlap in the manifest | Fix the manifest with `/architect`; see the example below |
 | `RESULT: REVIEW` with `NO REPORT` | The child process failed (usage limit, network, auth) | Read `.claude/state/runs/<ID>.log` |
