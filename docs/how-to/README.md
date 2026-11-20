@@ -71,7 +71,7 @@ python3 /tmp/agentic-flow/.claude/bin/agentic.py install .
 
 It is the same installer the plugin uses. It copies the flow, adds what it needs to your `.claude/settings.json` without removing anything of yours, and detects your languages. Running it again is safe:
 
-<p align="center"><img src="../assets/screens/install.png" width="760" alt="Real output of agentic.py install in a TypeScript repo: 23 new files, the settings.json additions, two .gitignore lines, the default config and the common and TypeScript rules. A second run reports everything unchanged."></p>
+<p align="center"><img src="../assets/screens/install.png" width="760" alt="Real output of agentic.py install in a TypeScript repo: 23 new files, the settings.json additions, the .gitignore lines, the default config and the common and TypeScript rules. A second run reports everything unchanged."></p>
 
 Commit it, so your team, CI and cloud sessions get the flow too:
 
