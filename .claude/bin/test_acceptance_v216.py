@@ -52,13 +52,15 @@ class DiagnosisTests(unittest.TestCase):
         self.addCleanup(self.repo.cleanup)
         self.home = temp_dir(self, "v216-home-")
         git = shutil.which("git")
-        self.git_dir = temp_dir(self, "v216-git-")
-        try:  # a folder with git alone, so the host's python3 stays off PATH
-            os.symlink(git, self.git_dir / Path(git).name)
-        except OSError:  # no symlinks (Windows without the privilege): git's own folder; a copied git.exe cannot run
-            self.git_dir = Path(git).parent
+        # git's own folder, unless it also holds python3 (/usr/bin): then a folder with a link to git alone. A
+        # linked or copied git.exe on Windows cannot find its installation, so it never gets there.
+        self.git_dir = Path(git).parent
         if shutil.which("python3", path=str(self.git_dir)):
-            self.skipTest("git's own folder also holds python3")
+            self.git_dir = temp_dir(self, "v216-git-")
+            try:
+                os.symlink(git, self.git_dir / Path(git).name)
+            except OSError:
+                self.skipTest("git's folder holds python3 and no link to git can be made")
 
     def env(self, python3="plain"):
         """python3: "plain" (a fake on PATH), "none" (no python3), or "store" (under a WindowsApps folder)."""
