@@ -111,7 +111,9 @@ A version is published by merging the pull request that bumps it: no second pull
    python3 .claude/bin/agentic.py release-notes
    ```
 
-2. As the pull request's last commit, after any update from `main`, record the flow's history so upgrades recognise this version too, and commit it. It needs a full clone, not a shallow one:
+2. If the release changes the flow's code or prompts, check `.claude/flow-budget.json`: `python3 -m unittest discover -s .claude/bin -p test_lean.py` names a measure past its budget, or more than 5 % below it. Write the new numbers and a `why` in that file, in the same pull request.
+
+3. As the pull request's last commit, after any update from `main`, record the flow's history so upgrades recognise this version too, and commit it. It needs a full clone, not a shallow one:
 
    ```bash
    python3 .claude/bin/agentic.py flow-history
@@ -120,9 +122,9 @@ A version is published by merging the pull request that bumps it: no second pull
 
    The `history` check of the pull request fails until you do, and again if `main` changes a shipped file afterwards: regenerate and commit once more.
 
-3. Merge. The `agentic-flow-release` workflow checks the history again, creates the `agentic-flow--v<version>` tag on the merge commit and the GitHub release, titled `agentic-flow <version>`, with the notes of step 1. A merge that does not change the version publishes nothing.
+4. Merge. The `agentic-flow-release` workflow checks the history again, creates the `agentic-flow--v<version>` tag on the merge commit and the GitHub release, titled `agentic-flow <version>`, with the notes of step 1. A merge that does not change the version publishes nothing.
 
-4. If the workflow fails, fix the cause in a new pull request and publish with **Run workflow** in the repository's Actions tab, on `agentic-flow-release`. Nothing is tagged until every check passes.
+5. If the workflow fails, fix the cause in a new pull request and publish with **Run workflow** in the repository's Actions tab, on `agentic-flow-release`. Nothing is tagged until every check passes.
 
 CI already validates the plugin on every pull request; to check it locally, run `claude plugin validate --strict .`.
 

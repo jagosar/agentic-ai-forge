@@ -252,6 +252,8 @@ The fallback engine first runs `<cli> auth status` once, with the agents' enviro
 
 **The clean-code ratchet.** With `.claude/quality-baseline.json` in the repo (install creates it from the code as it is), `baseline` and `verify` add a `quality` phase: function length and nesting (Python through `ast`, JavaScript/TypeScript through a heuristic scanner), file size and long lines may not get worse than the baseline, and new code must respect the limits. A failure names the file, so the package that owns it goes to a fix cycle. Only a person writes the baseline: `quality --update` lowers it, and agents can run neither `--init` nor `--update`.
 
+**The flow's own diet.** The flow's repository holds itself to three more checks, in `test_lean.py` and `test_hook_path.py`: its code imports only the standard library (and Node built-ins in the workflow); a debt marker in its code names an issue on the same line; and `.claude/flow-budget.json` records its code lines and prompt bytes, so a release that grows past the budget, or shrinks more than 5 % below it, fails until the budget is changed with a `why`. The PreToolUse hook, which runs on every tool call, loads only the guard: a test fails if it loads the launcher, the installer or the network modules again.
+
 Tracked files are always compared, even in a folder named like an artefact (`coverage/`, `build/`). Each agent may claim only its own kind of ID: an implementer its packages, QA `QA`, the test-author `AT`, the doc-updater `DOCS`, the read-only judges `REVIEW`.
 
 ## 5. Permission matrix

@@ -1,10 +1,10 @@
-"""Acceptance tests of agentic-flow 2.17.0: AC-001 .. AC-012 of docs/architecture/0024 (annexes in every brief;
-dotfile and extensionless references and escaped pipes in section 4b; kept copies install and doctor clean up; the
-fallback's network check; another session refused by sessions-check; the docs; the release).
+"""The 2.17.0 field fixes: annexes in every brief; dotfile and extensionless references and escaped pipes in section
+4b; kept copies install and doctor clean up; the fallback's network check; another session refused by sessions-check;
+their docs. Moved as they were from test_acceptance_v217.py (design 0024, agentic-flow 2.17.0) when 2.18.0 retired it
+(design 0025); the release checks stayed behind.
 
-Run: python3 -m unittest discover -s .claude/bin -p test_acceptance_v217.py
-Everything runs in temporary repos or in-process. Nothing is spent, and nothing reaches the network: network cases
-use a closed local port, a local http.server or an injected opener, with every proxy variable removed.
+Run: python3 -m unittest discover -s .claude/bin -p test_field_fixes.py
+Everything runs in temporary repos or in-process. Nothing is spent, and nothing reaches the network.
 """
 import http.server
 import importlib.util
@@ -29,6 +29,7 @@ ROOT = BIN.parents[1]
 sys.path.insert(0, str(BIN))
 import brief  # noqa: E402
 import compat  # noqa: E402
+import core  # noqa: E402
 import manifest_check  # noqa: E402
 import testutil  # noqa: E402
 from test_agentic import MANIFEST, Repo  # noqa: E402
@@ -38,6 +39,7 @@ SEEN = Path(".claude/state/hook-seen.json")
 PROXY_NAMES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy",
                "NO_PROXY", "no_proxy")
 UPGRADE = ".claude/state/upgrade/"
+FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own repo")
 CLAUDE = shlex.join([Path(sys.executable).as_posix()])  # shlex would eat a Windows path's backslashes
 
 
@@ -367,6 +369,7 @@ class SessionTests(unittest.TestCase):
 
 # ---------- AC-010, AC-011: docs and release ----------
 
+@FLOW_REPO_ONLY  # a project does not carry the flow's own guides
 class DocsTests(unittest.TestCase):
     def read(self, rel):
         return (ROOT / rel).read_text(encoding="utf-8")
@@ -387,20 +390,6 @@ class DocsTests(unittest.TestCase):
         works = self.read("docs/how-it-works.md")
         self.assertIn("sessions-check", works)
         self.assertRegex(works, r"(?i)network|reach the API")
-
-
-class ReleaseTests(unittest.TestCase):
-    def test_ac_011_release_2_17_0(self):
-        plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.17.0")
-        notes = load("upgrade_v217", BIN / "upgrade.py").NOTES["2.17.0"]
-        self.assertGreaterEqual(len(notes), 4)
-        for words in ("annex", "sessions-check", "upgrade-stale", "proxy"):
-            self.assertTrue(any(words in n for n in notes), words)
-        self.assertEqual(sorted(p.name for p in BIN.glob("test_acceptance*.py")), ["test_acceptance_v217.py"])
-        moved = (BIN / "test_hook_diagnosis.py").read_text(encoding="utf-8")
-        for name in ("DiagnosisTests", "GitBashTests", "DoctorGitBashTests", "CliTests", "DocsTests"):
-            self.assertIn(f"\nclass {name}(", moved)
 
 
 if __name__ == "__main__":
