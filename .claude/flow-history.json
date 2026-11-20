@@ -397,6 +397,7 @@
    "f7ed37cfa08ea8383a85e92036bbde7a604b170595c690b9f5a6aa9a9037b6a3"
   ],
   ".claude/bin/test_acceptance_v216.py": [
+   "29b4f89b915bb07c90ffad98addc295155d9a63dea4295307e0cf9b214ad727d",
    "5a37a557f3ba9a9f5d61ae82b2425a0a72f4e991cc6932022870aac95950981d"
   ],
   ".claude/bin/test_acceptance_v22.py": [
@@ -574,6 +575,7 @@
    "009cc23457cb9287fd6f0d187b762d405085e125f99d9bd67eb9afba6fcfaf7f",
    "1a8f794f6b11a0bb838618a2dd4c9f9b1ea6aff462cf286e591241a8f154c7fc",
    "4c725e5523e6dbf917c7452779003446aaf90ef264b135a61a15c33be2bf3df0",
+   "7d14b33cabb0d69506daf01f156aeb4583672a06751772c9cf8fe939d31cccc8",
    "865a1fce55d6c5fa6df4e43b83b8505d918cfa46c7cc284f926e80c0852c068a"
   ],
   ".claude/bin/test_layout.py": [
@@ -894,5 +896,5 @@
    "3f89e6998f224d177ff301cf1c430250a1cf8cb73db672cecf8c882c9b57e5f7"
   ]
  },
- "generated_from": "05e0f3dbaa781e510e316384c8ef98bd80a9c9be"
+ "generated_from": "e95c02cc31c237843a55298b265af128b1f55192"
 }
