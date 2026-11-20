@@ -236,6 +236,8 @@ The hook's Bash rules are regular expressions: they stop mistakes, not a determi
 
 **Changing the flow itself.** The agentic-flow repository is changed by hand: Claude Code does not let the agents the flow starts write under `.claude/`, where the flow lives. A plan for it carries `"maintainer": true`, which lets its packages own `.claude/` files except the never-owned ones (the settings, `.claude/state/`, `hook.py`, `waiting.py` and the quality baseline). `validate` accepts the flag only in the agentic-flow repository, and `pipeline-plan`, `run-pipeline` and every `run-*` command refuse such a plan before writing anything, so no agent is started for work it cannot do.
 
+**Who failed.** When a phase or the acceptance run fails, `verify` names the packages that own what the failure mentions: their files, or their `AC-NNN` in a failing test's name. It reads only failing tests. With `reports` in the manifest (the JUnit or NUnit 2/3 XML a command writes, such as pytest's `--junitxml` or Pester's `-OutputFormat NUnitXml`), the failing tests come from the report, by name, and the baseline compares them by name too. Without it, the console is read without the lines of passing tests (`PASSED`, `[+]`, `✓`, `--- PASS`), and a runner's summary counts read as `N`. The stop gate reads the same way. A declared report is deleted before its command runs, so a stale one is never read, and close-stage never counts it as a change.
+
 **The clean-code ratchet.** With `.claude/quality-baseline.json` in the repo (install creates it from the code as it is), `baseline` and `verify` add a `quality` phase: function length and nesting (Python through `ast`, JavaScript/TypeScript through a heuristic scanner), file size and long lines may not get worse than the baseline, and new code must respect the limits. A failure names the file, so the package that owns it goes to a fix cycle. Only a person writes the baseline: `quality --update` lowers it, and agents can run neither `--init` nor `--update`.
 
 Tracked files are always compared, even in a folder named like an artefact (`coverage/`, `build/`). Each agent may claim only its own kind of ID: an implementer its packages, QA `QA`, the test-author `AT`, the doc-updater `DOCS`, the read-only judges `REVIEW`.
@@ -258,7 +260,7 @@ Tracked files are always compared, even in a folder named like an artefact (`cov
 | qa (`QA`) | latest Sonnet | `qa.files` (default `qa/`) | `allow_bash` | write production code |
 | doc-updater (`DOCS`) | latest Sonnet | `docs.files` (default `README.md`, `CHANGELOG.md`, `docs/`) | `git diff/status/log` | write code, tests, the codemap, `docs/architecture/` |
 
-The gatekeeper is the only agent that may use Haiku (`validate` rejects it anywhere else): it relays a command and its output, and never reads or writes code. The workflow does not trust what it relays blindly: a reply that is not the expected JSON stops the run, and the state-changing steps are never retried.
+The gatekeeper is the only agent that may use Haiku (`validate` rejects it anywhere else): it relays a command and its output, and never reads or writes code. The workflow does not trust what it relays blindly: a reply that is not the expected JSON stops the run, and the state-changing steps are never retried. Only prepare and a lone `open-stage`, which can be repeated safely, get one more try when the reply is lost or the interpreter crashed before `agentic.py` answered; the run lists them in `environment_retries`.
 
 For every agent of the flow: no secrets, no `--no-verify`, no relaxing existing configuration, no disabling tests. Nobody may own `architecture.md`, `.claude/` or `docs/architecture/`, and the hook blocks writes to them (and to the codemap) even when a zone includes them by prefix, such as `docs/`.
 
@@ -310,7 +312,7 @@ The two engines are kept identical on purpose. The schemas, prompts and limits l
 ├── workflows/
 │   ├── agentic-implement.js   the whole pipeline as a native workflow
 │   └── pipeline-spec.json     schemas, prompts and limits shared with the fallback engine
-├── rules-library/          common rules and 10 languages (source)
+├── rules-library/          common rules and 11 languages (source)
 ├── rules/agentic/          installed by rules-sync; Claude Code loads .claude/rules/
 ├── bin/
 │   ├── agentic.py          the entry point: the command table (validate, pipeline-plan, open/close-stage, seq, verify,
@@ -325,6 +327,7 @@ The two engines are kept identical on purpose. The schemas, prompts and limits l
 │   ├── guardrail.py        the PreToolUse hook: guard, claims, content checks, the heartbeat, hooks-check
 │   ├── brief.py            slices architecture.md into the briefs the agents read
 │   ├── findings.py         tiers, waivers, what blocks and fingerprints
+│   ├── reports.py          the failing tests of a JUnit or NUnit report
 │   ├── doctor.py           what the flow left stale in a project, and --fix
 │   ├── plan_picture.py     the HTML+SVG picture of the manifest
 │   ├── waiting.py          hook: records which agent is waiting for your permission or answer

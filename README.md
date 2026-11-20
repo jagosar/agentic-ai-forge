@@ -87,7 +87,7 @@ Requirements in one line: a Pro, Max, Team or Enterprise plan, Dynamic workflows
 | `agentic.py` | script | The guardrail hook, the deterministic steps, the ledger and the installer |
 | `/red-green-proof` | your session | A bug fix you can trust: a test red before the fix, green after it, and red again when the fix is reverted |
 
-Models are set by alias (`opus`, `sonnet`, and `haiku` for the gatekeeper only), which always resolve to the newest version your Claude Code knows. `validate` fails if anyone pins another model. Language rules for ten language families are installed by `rules-sync` for the languages `agentic.py stack` detects; see [Language rules](docs/how-to/README.md#language-rules).
+Models are set by alias (`opus`, `sonnet`, and `haiku` for the gatekeeper only), which always resolve to the newest version your Claude Code knows. `validate` fails if anyone pins another model. Language rules for eleven language families are installed by `rules-sync` for the languages `agentic.py stack` detects; see [Language rules](docs/how-to/README.md#language-rules).
 
 ## Guardrails
 

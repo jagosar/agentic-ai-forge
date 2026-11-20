@@ -53,3 +53,17 @@ One design could cover items 2, 4 and 5, plus the PowerShell rules (7–9), as "
 - add `powershell.md` with stack detection.
 
 Items 6 and 10 are prompt changes that need a scenario each.
+
+## Status after 2.15.0 (design 0022)
+
+| # | Shipped in 2.15.0 |
+|---|---|
+| 1, 3 | Already merged before the release (pull request 113): prepare messages, summary counts, Pester's `[-]`. |
+| 2 | Prepare and a lone `open-stage` get one retry when the reply is lost or the interpreter crashed before `agentic.py` answered; listed in `environment_retries`. |
+| 4, 5 | `reports` in the manifest: verification, the baseline and the stop gate read failing tests from the runner's JUnit or NUnit XML. Without a report, the lines of passing tests are skipped. The Pester 3.4 NUnit shape is inferred, not checked against a real report: the next PowerShell run should declare `reports` and confirm. |
+| 6 | A check the implementer could not run becomes a `needs validation` pending item; the cause stays unreproduced (issue 118). |
+| 7–9 | `.claude/rules-library/powershell.md`, with stack detection for `.ps1`, `.psm1` and `.psd1`. The test-author tests its helpers and doubles, and the test-auditor flags one no test runs. |
+| 10 | The plan-reviewer and `/architect` look for existing tests that pin what a plan changes. |
+| 11 | The launch warning shipped; a worktree per cycle stays excluded. |
+
+**Measured.** The two saved scenarios met 5 of 5 runs with the 2.14.0 definitions and 5 of 5 with the new ones (one-sided Fisher p = 1.0; `bench/results/scenarios/auditor-untested-double-20261120-084056.json`, `plan-pinned-literal-20261120-084459.json`). The old test-auditor already flags the fake mailer and the old plan-reviewer already names the pinning test. These scenarios show no gain from the prompt lines; they hold them as regression checks, and a harder case is needed to show an effect.
