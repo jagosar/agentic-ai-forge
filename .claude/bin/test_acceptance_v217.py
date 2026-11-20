@@ -10,6 +10,7 @@ import http.server
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import socket
 import ssl
@@ -37,6 +38,7 @@ SEEN = Path(".claude/state/hook-seen.json")
 PROXY_NAMES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy",
                "NO_PROXY", "no_proxy")
 UPGRADE = ".claude/state/upgrade/"
+CLAUDE = shlex.join([Path(sys.executable).as_posix()])  # shlex would eat a Windows path's backslashes
 
 
 def temp_dir(test, prefix):
@@ -274,7 +276,7 @@ class NetworkTests(unittest.TestCase):
                 launch._CLI_CHECKED.clear()
                 with mock.patch.object(launch, "_auth_status", return_value=(0, status)), \
                         mock.patch.object(launch, "_reachable", side_effect=AssertionError("checked")) as reach, \
-                        mock.patch.dict(os.environ, {"AGENTIC_CLAUDE": shutil.which("git") or sys.executable}):
+                        mock.patch.dict(os.environ, {"AGENTIC_CLAUDE": CLAUDE}):
                     launch.require_cli({})
                 reach.assert_not_called()
 
