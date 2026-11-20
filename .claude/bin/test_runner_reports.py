@@ -1,8 +1,9 @@
-"""Acceptance tests of agentic-flow 2.15.0: AC-001 .. AC-018 of docs/architecture/0022 (runner reports read by
-verification, the baseline and the stop gate; the console without passing lines; one retry when a stage cannot open;
-checks the implementer could not run; the PowerShell rules; the prompt duties and their scenarios; the release).
+"""Runner reports and what came with them: the failing tests of JUnit and NUnit reports read by verification, the
+baseline and the stop gate; the console without passing lines; one retry when a stage cannot open; checks not run as
+pending; the PowerShell rules; the prompt duties and their scenarios. Moved as they were from test_acceptance_v215.py
+(design 0022, agentic-flow 2.15.0) when 2.16.0 retired it (design 0023); the release checks stayed behind.
 
-Run: python3 -m unittest discover -s .claude/bin -p test_acceptance_v215.py
+Run: python3 -m unittest discover -s .claude/bin -p test_runner_reports.py
 Reports are written by scripts in temporary projects; engines run on conformance scenarios with simulated agents.
 Nothing is spent.
 """
@@ -20,6 +21,10 @@ BIN = Path(__file__).resolve().parent
 ROOT = BIN.parents[1]
 sys.path.insert(0, str(BIN))
 from test_agentic import MANIFEST, PY, Repo  # noqa: E402
+import core  # noqa: E402
+
+# The saved scenarios live only in the flow's own repo: an installed project has no bench/.
+FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own repo")
 
 CONFORMANCE = json.loads((BIN / "conformance.json").read_text(encoding="utf-8"))
 
@@ -435,6 +440,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn("environment_retries", self.read(".claude/commands/implement.md"))
 
 
+@FLOW_REPO_ONLY
 class ScenarioTests(unittest.TestCase):
     BASE = ROOT / "bench/scenarios"
 
@@ -458,28 +464,6 @@ class ScenarioTests(unittest.TestCase):
         self.assertTrue(any("test_report" in w for w in words), words)
         self.assertTrue(scenario.met({}, plan["expect"], text=" ".join(words)))
         self.assertFalse(scenario.met({}, plan["expect"], text="VERDICT: READY"))
-
-
-class ReleaseTests(unittest.TestCase):
-    def test_ac_018_release_2_15_0(self):
-        plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.15.0")
-        upgrade = load("upgrade_v215", BIN / "upgrade.py")
-        notes = " ".join(upgrade.NOTES["2.15.0"])
-        self.assertGreaterEqual(len(upgrade.NOTES["2.15.0"]), 4)
-        for word in ("reports", "PowerShell", "retr"):
-            self.assertIn(word, notes)
-        installer = load("installer_v215", BIN / "installer.py")
-        self.assertIn(".claude/bin/reports.py", installer.INSTALL_GLOBS)
-        self.assertEqual(sorted(p.name for p in BIN.glob("test_acceptance*.py")), ["test_acceptance_v215.py"])
-        moved = (BIN / "test_fix_cycles.py").read_text(encoding="utf-8")
-        for name in ("FingerprintTests", "ReReviewTests", "EscalationTests", "BudgetTests", "ConfigTests",
-                     "AdvisorTests", "BenchTests"):
-            self.assertIn(f"\nclass {name}(", moved)
-        hub = (ROOT / "docs/how-to/README.md").read_text(encoding="utf-8")
-        self.assertLessEqual(len(hub.splitlines()), 260)
-        self.assertRegex(hub, r"(?i)eleven languages|11 languages")
-        self.assertIn("PowerShell", hub)
 
 
 if __name__ == "__main__":
