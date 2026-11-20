@@ -1,8 +1,9 @@
-"""Acceptance tests of agentic-flow 2.16.0: AC-001 .. AC-011 of docs/architecture/0023 (hooks-check says why the hook
-looks dead, Git Bash first; doctor --fix writes the Git Bash path; the agents lose CLAUDE_CODE_SIMPLE; the fallback
-checks its CLI and its login before the first agent; the docs; the release).
+"""The hook diagnosis and the fallback's CLI check: why the hook looks dead (Git Bash first on Windows, python3,
+settings, worktree heartbeats), doctor writing the Git Bash path, the agents losing CLAUDE_CODE_SIMPLE, and the
+fallback's CLI and login check before any state. Moved as they were from test_acceptance_v216.py (design 0023,
+agentic-flow 2.16.0) when 2.17.0 retired it (design 0024); the release checks stayed behind.
 
-Run: python3 -m unittest discover -s .claude/bin -p test_acceptance_v216.py
+Run: python3 -m unittest discover -s .claude/bin -p test_hook_diagnosis.py
 Hooks-check runs in temporary repos with a fixed PATH and HOME; the fallback runs the fake `claude`. Nothing is spent.
 """
 import importlib.util
@@ -20,6 +21,7 @@ BIN = Path(__file__).resolve().parent
 ROOT = BIN.parents[1]
 sys.path.insert(0, str(BIN))
 import compat  # noqa: E402
+import core  # noqa: E402
 import testutil  # noqa: E402
 from test_agentic import MANIFEST, PY, SCRIPT, Repo  # noqa: E402
 
@@ -28,6 +30,7 @@ GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign
 DIAGNOSIS_KEYS = {"cwd", "project_dir", "root", "settings", "hook_command", "heartbeats", "worktree", "python3",
                   "hints", "git_bash"}
 GIT_BASH_KEYS = {"configured", "default", "derived", "needs_path", "missing"}
+FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own repo")
 USER_GIT = "C:\\Users\\u\\AppData\\Local\\Programs\\Git"
 
 
@@ -391,6 +394,7 @@ class CliTests(unittest.TestCase):
         self.assertGreater(len(testutil.fake_calls(self.logs)), 3)
 
 
+@FLOW_REPO_ONLY  # a project does not carry the flow's own guides
 class DocsTests(unittest.TestCase):
     def read(self, rel):
         return (ROOT / rel).read_text(encoding="utf-8")
@@ -412,22 +416,6 @@ class DocsTests(unittest.TestCase):
         for text in (implement, hub, works):
             for claim in ("not shared", "not signed in"):
                 self.assertNotIn(claim, text)
-
-
-class ReleaseTests(unittest.TestCase):
-    def test_ac_010_release_2_16_0(self):
-        plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertTrue(plugin["version"].startswith("2.16."), plugin["version"])  # 2.16.1 is a patch of 2.16.0
-        notes = load("upgrade_v216", BIN / "upgrade.py").NOTES["2.16.0"]
-        self.assertGreaterEqual(len(notes), 3)
-        self.assertTrue(any("hooks-check" in n for n in notes))
-        self.assertTrue(any("doctor --fix" in n and "CLAUDE_CODE_GIT_BASH_PATH" in n for n in notes))
-        self.assertTrue(any("auth status" in n and "CLAUDE_CODE_SIMPLE" in n for n in notes))
-        self.assertEqual(sorted(p.name for p in BIN.glob("test_acceptance*.py")), ["test_acceptance_v216.py"])
-        moved = (BIN / "test_runner_reports.py").read_text(encoding="utf-8")
-        for name in ("ReportTests", "ManifestTests", "VerifyReportTests", "GateReportTests", "RetryTests",
-                     "PendingTests", "RulesTests", "PromptTests", "ScenarioTests"):
-            self.assertIn(f"\nclass {name}(", moved)
 
 
 if __name__ == "__main__":
