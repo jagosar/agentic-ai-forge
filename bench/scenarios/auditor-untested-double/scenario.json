@@ -1,0 +1,16 @@
+{
+  "_comment": "Design 0022, issue 116: a test double that nothing exercises alone. FakeMailer.send appends to a copy (the sent property returns a new list), so mailer.sent is always [] and both AC-002 tests pass against an implementation that emails a paid invoice; AC-001 checks only the call count, not the address or subject. No test runs the fake on its own. The auditor must answer FAIL with a blocking finding that names FakeMailer.",
+  "agent": "test-auditor",
+  "prompt": "test_auditor",
+  "values": {
+    "brief": "brief.md",
+    "coverage": "{\"AC-001\": [\"acceptance/test_reminders.py::test_ac_001_an_overdue_invoice_is_reminded_once\"], \"AC-002\": [\"acceptance/test_reminders.py::test_ac_002_a_paid_invoice_is_never_reminded\", \"acceptance/test_reminders.py::test_ac_002_a_paid_invoice_is_not_reminded_before_its_due_date\"]}",
+    "rules": ""
+  },
+  "expect": {
+    "status": "FAIL",
+    "finding_mentions": [
+      "FakeMailer"
+    ]
+  }
+}

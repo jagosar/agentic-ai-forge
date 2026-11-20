@@ -1,0 +1,13 @@
+{
+  "_comment": "Design 0022, issue 117: the plan changes the summary's wording, while tests/test_report.py, which no package owns and section 4b does not list, still asserts the old text. The verify phase would fail with no owner. The plan-reviewer must answer FIX and name tests/test_report.py.",
+  "agent": "plan-reviewer",
+  "prompt_text": "Review architecture.md.",
+  "schema": false,
+  "model": "opus",
+  "expect": {
+    "text_mentions": [
+      "FIX",
+      "test_report.py"
+    ]
+  }
+}
