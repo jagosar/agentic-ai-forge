@@ -529,7 +529,10 @@ const hookStep = step(first, 0)
 if (hookStep && !ok(hookStep)) return stop('prepare', HOOKS_DEAD, { gate: hookStep })
 const planStep = step(first, 1)
 const plan = ok(planStep) ? lastJson(planStep.output) : null
-if (!plan) return stop('prepare', 'pipeline-plan failed: the manifest is not valid', { gate: planStep })
+// Only a pipeline-plan that ran and refused the manifest says the manifest is invalid; a lost or empty reply does not.
+if (!first) return stop('prepare', LOST)
+if (!plan) return stop('prepare', planStep && !ok(planStep) ? 'pipeline-plan failed: the manifest is not valid'
+  : 'pipeline-plan produced no readable output', { gate: planStep })
 // Language rules (rules-sync): every agent that writes or judges code receives them, printed when their text arrived
 // whole through the gatekeeper (the checksum), else as their paths.
 const rulesIntact = typeof plan.rules_text === 'string' && plan.rules_text !== '' &&

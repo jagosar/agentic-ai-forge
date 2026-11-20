@@ -27,7 +27,7 @@ Launch the saved workflow with the Workflow tool:
 - **name:** `agentic-implement`;
 - **`args`:** `{}`, or `{ "start_wave": N }` if you were given a wave.
 
-It runs in the background. Tell the user in one line that it has started, that they can follow it with `/workflows` and keep talking to you, and end your turn. Do not wait or poll: the completion notification will wake you.
+It runs in the background. Tell the user in one line that it has started, that they can follow it with `/workflows` and keep talking to you, and that nobody (they, you or another session) may commit, switch branches or edit files in this folder until it ends: the guard compares the git state at every stage and stops the run if it changed. Then end your turn. Do not wait or poll: the completion notification will wake you.
 
 While it runs:
 - **"How is it going?":** answer with `python3 .claude/bin/agentic.py status` (the ledger) or point to `/workflows`.

@@ -18,7 +18,16 @@ from core import (  # noqa: E402
 
 # A phase that already failed at baseline is compared failure by failure: the lines that name a failure, without the
 # durations that change from run to run. A line not seen at baseline is a regression.
-FAILURE_LINE_RE = re.compile(r"(?i)\b(?:fail(?:ed|ure|ures|ing|s)?|errors?)\b|[✕✗×❌]")
+FAILURE_LINE_RE = re.compile(r"(?i)\b(?:fail(?:ed|ure|ures|ing|s)?|errors?)\b|[✕✗×❌]|^\s*\[-\]")  # [-]: Pester
+
+# A runner's summary counts every test: a cycle that adds passing tests changes "10 passed" or "Passed: 10" beside an
+# old failure. The counts read as N, so the summary only changes when the words do; the new failure names itself.
+COUNT_WORDS = r"(?:tests?|passed|passing|failed|failing|failures?|errors?|skipped|pending|todo|total|inconclusive" \
+              r"|xfailed|xpassed|warnings?|deselected)"
+COUNT_AFTER_RE = re.compile(r"(?i)\b\d+(?=\s+(?:tests?\s+)?" + COUNT_WORDS + r"\b)")
+# "Passed: 10" only with a summary's words: "Error: 404" and "Error: 500" are two failures.
+COUNT_BEFORE_RE = re.compile(r"(?i)(\b(?:tests|passed|failed|failures|errors|skipped|pending|inconclusive|notrun|total)"
+                             r"\s*:\s*)\d+\b")
 
 DURATION_RE = re.compile(r"\(?\b\d+(?:\.\d+)?\s?(?:ms|s|sec|secs|seconds)\b\)?|\b0x[0-9a-fA-F]+\b")  # and addresses
 
@@ -194,8 +203,9 @@ def install_quality_baseline(target, dry_run):
 # ---------- baseline and verify ----------
 
 def normal_failure(line):
-    """A failure line without durations or repeated spaces: the same failure reads the same in every run."""
-    return " ".join(DURATION_RE.sub("", line).split())[:MAX_TAIL_LINE]
+    """A failure line without durations, counts or repeated spaces: the same failure reads the same in every run."""
+    counted = COUNT_BEFORE_RE.sub(r"\1N", COUNT_AFTER_RE.sub("N", DURATION_RE.sub("", line)))
+    return " ".join(counted.split())[:MAX_TAIL_LINE]
 
 def failure_lines(lines):
     """The lines of an output that name a failure, normalised, without repeats."""
