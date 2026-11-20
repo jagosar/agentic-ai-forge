@@ -48,7 +48,7 @@ Then, in the session:
 `/agentic-flow:init`:
 - **Copies the flow** to `.claude/`: agents, commands, workflow, `agentic.py` and the rules library. The flow's own tests are not copied.
 - **Merges your `.claude/settings.json`:** adds the permissions, the `deny` rules, the hook and `enableWorkflows`, removing nothing of yours.
-- **Adds configuration:** creates `.claude/agentic.json` if missing and adds `.claude/state/` and `.agentic-result.json` to `.gitignore`.
+- **Adds configuration:** creates `.claude/agentic.json` if missing and adds `.claude/state/`, `.agentic-result.json` and `.claude/settings.local.json` (one machine's permissions and Git Bash path) to `.gitignore`.
 - **Installs rules:** detects your languages and installs their rules in `.claude/rules/agentic/`.
 - **Keeps a record:** stores the version and the fingerprint of every installed file in `.claude/agentic-install.json`.
 

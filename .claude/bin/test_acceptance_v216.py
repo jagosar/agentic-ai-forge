@@ -417,7 +417,7 @@ class DocsTests(unittest.TestCase):
 class ReleaseTests(unittest.TestCase):
     def test_ac_010_release_2_16_0(self):
         plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.16.0")
+        self.assertTrue(plugin["version"].startswith("2.16."), plugin["version"])  # 2.16.1 is a patch of 2.16.0
         notes = load("upgrade_v216", BIN / "upgrade.py").NOTES["2.16.0"]
         self.assertGreaterEqual(len(notes), 3)
         self.assertTrue(any("hooks-check" in n for n in notes))

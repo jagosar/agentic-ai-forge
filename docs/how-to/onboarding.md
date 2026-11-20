@@ -43,6 +43,8 @@ agentic-flow unknown -> 1.1.0 -> ~/islet
 RESULT: OK
 ```
 
+A newer installer also lists `.claude/settings.local.json` on the `.gitignore` line: it holds one machine's permissions and Git Bash path.
+
 - **28 new files** under `.claude/`: the agents, `/architect` and `/implement`, the workflow, `agentic.py` and the rules library.
 - **`settings.json`** is created with the flow's permissions and guardrail hook. If you already had one, it is merged: nothing of yours is removed.
 - **A newer installer** also appends `StructuredOutput` to the hook's matcher and sets a longer hook timeout, so its `settings.json:` line lists the hook change for a repo that had an older hook. No output of that run is quoted here, because none was made.
