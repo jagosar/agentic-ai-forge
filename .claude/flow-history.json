@@ -414,6 +414,7 @@
    "5a37a557f3ba9a9f5d61ae82b2425a0a72f4e991cc6932022870aac95950981d"
   ],
   ".claude/bin/test_acceptance_v217.py": [
+   "6a6a5c104651a5adba0d36430e58b59f83857ffeb7df7467a451fca1f0cc3ec6",
    "c53c8c8b88a9d64846067082adbc3f8e4d2e27fb3dccf5e2ff13950ce83931c5"
   ],
   ".claude/bin/test_acceptance_v22.py": [
@@ -928,5 +929,5 @@
    "3f89e6998f224d177ff301cf1c430250a1cf8cb73db672cecf8c882c9b57e5f7"
   ]
  },
- "generated_from": "e47e3af03882e097f8dd01c3c19f2ce8665acf24"
+ "generated_from": "a0027224846e25638ba4fdd137cc648a1291a184"
 }
