@@ -620,7 +620,8 @@
    "a81b8e617c60ce473db556ba01e343ce79b672d92191340bd8a809d3bd7e514f"
   ],
   ".claude/bin/test_lean.py": [
-   "4ffc1a8a73d91163bd04d042a25ee4c55d9bfd2cebb2fec980de5fdbbd33428c"
+   "4ffc1a8a73d91163bd04d042a25ee4c55d9bfd2cebb2fec980de5fdbbd33428c",
+   "50071216d352a53791ed0b828681b4b4f470d618ffc5ad33b4fc83b22846142f"
   ],
   ".claude/bin/test_manifest_check.py": [
    "1d4e28418b845a13d8141c435a66dc80aea692e2e33c74eeb37c7ab6b1a880cd",
@@ -944,5 +945,5 @@
    "3f89e6998f224d177ff301cf1c430250a1cf8cb73db672cecf8c882c9b57e5f7"
   ]
  },
- "generated_from": "3bf24892554f6f7dfb7ff03d9568517c7d03f597"
+ "generated_from": "74f31fa793ef419463368e9c3acf015566ddad32"
 }
