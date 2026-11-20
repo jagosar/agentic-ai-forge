@@ -131,7 +131,7 @@ If a stage stops (a blocked package, a broken acceptance test), fix the cause an
 
 ## Language rules
 
-`.claude/rules-library/` holds the common rules (`common.md`) and rules for ten languages: Python, TypeScript/JavaScript, Go, Rust, Java, Kotlin, C#, Ruby, PHP and Swift, adapted from ECC. Each has the same sections: style, errors, tests, security and the usual commands for `verify`.
+`.claude/rules-library/` holds the common rules (`common.md`) and rules for eleven languages: Python, TypeScript/JavaScript, Go, Rust, Java, Kotlin, C#, Ruby, PHP and Swift, adapted from ECC, and PowerShell, written for the flow (Pester 3.4 traps, and how to write a report the flow reads). Each has the same sections: style, errors, tests, security and the usual commands for `verify`.
 
 - **Installed by** `rules-sync`, when `/architect` finishes and when `/implement` starts. It copies to `.claude/rules/agentic/` the common rules, the rules of the manifest's `stack` and those of the languages it detects.
 - **Delivered to the agents twice:** Claude Code loads `.claude/rules/` by itself (language rules only around files of that language, thanks to `paths:`), and the workflow also passes the list in every agent's prompt.
@@ -219,7 +219,7 @@ python3 bench/bench.py ab --a <ref> --b <ref>          # compares two versions o
 | `ALREADY PASS WITHOUT CODE` in wave 0 | The acceptance tests prove nothing | Revisit the criteria with `/architect`: they lack a concrete observable result |
 | `has used up its 2 --fix cycles` | The defect won't yield to repetition | Decide yourself, or change the contract or the criterion with `/architect` |
 | `mirror points to a file that does not exist` / `out of range` | The plan cites code that is not there | Ask `/architect` to correct the "patterns to mirror" |
-| Verification reports a `pre-existing failure` | That phase failed before the run | It neither blocks nor is blamed on a package. Fix it separately, or request it as a `fix` |
+| Verification reports a `pre-existing failure` | That phase failed before the run | It neither blocks nor is blamed on a package. Fix it separately, or request it as a `fix`. Declare `reports` in the manifest so failures are compared by test name |
 | `... is existing quality configuration` | An agent tried to relax a linter or formatter | As intended. If the design really requires it, add `"config_edit": true` to that package with `/architect` |
 | `tests are not disabled to turn them green` | An agent tried to add `skip`, `xfail` or `only` | Fix the test or report it blocked (`BLOCKED` for an implementer, `BLOCKER` for the others). Conditional skips (`skipIf`) are allowed |
 | `the report says DONE but the acceptance tests of your package fail` | The stop gate refused an implementer's report; it keeps working with the failing lines | Nothing, unless it reaches `denial 2 of 2`: then the report goes through and the fix cycle or you take over |

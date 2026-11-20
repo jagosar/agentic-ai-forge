@@ -1,8 +1,8 @@
-"""Acceptance tests of agentic-flow 2.14.0: AC-001 .. AC-011 of docs/architecture/0021 (escalation on the last fix
-attempt, the fallback's resumed fix attempts, the scoped re-review by fingerprint, the budget in agent calls, the
-advisor experiment, 2.13.0's acceptance file retired).
+"""Fix cycles: escalation on the last attempt, the fallback's resumed attempts, the scoped re-review by fingerprint,
+the budget in agent calls and the advisor experiment. Moved as they were from test_acceptance_v214.py (design 0021,
+agentic-flow 2.14.0) when 2.15.0 retired it (design 0022); the release checks stayed behind.
 
-Run: python3 -m unittest discover -s .claude/bin -p test_acceptance_v214.py
+Run: python3 -m unittest discover -s .claude/bin -p test_fix_cycles.py
 Engines run on conformance scenarios with simulated agents; commands run in temporary projects with a fake `claude`.
 Nothing is spent.
 """
@@ -19,7 +19,11 @@ from pathlib import Path
 BIN = Path(__file__).resolve().parent
 ROOT = BIN.parents[1]
 sys.path.insert(0, str(BIN))
+import core  # noqa: E402
 from test_agentic import Repo, testutil  # noqa: E402
+
+# The advisor variant and the bench live only in the flow's own repo: an installed project has no bench/.
+FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own repo")
 
 CONFORMANCE = json.loads((BIN / "conformance.json").read_text(encoding="utf-8"))
 SPEC = json.loads((ROOT / ".claude/workflows/pipeline-spec.json").read_text(encoding="utf-8"))
@@ -226,6 +230,7 @@ class ConfigTests(unittest.TestCase):
                 self.assertIn(message, r.stderr)
 
 
+@FLOW_REPO_ONLY
 class AdvisorTests(unittest.TestCase):
     def argv_with(self, spec_text):
         repo = Repo()
@@ -251,6 +256,7 @@ class AdvisorTests(unittest.TestCase):
         self.assertEqual((ROOT / ".claude/workflows/pipeline-spec.json").read_text(encoding="utf-8"), before)
 
 
+@FLOW_REPO_ONLY
 class BenchTests(unittest.TestCase):
     def test_ac_010_bench(self):
         base = ROOT / "bench" / "scenarios" / "re-review"
@@ -265,29 +271,6 @@ class BenchTests(unittest.TestCase):
         bench = load("bench_v214", ROOT / "bench" / "bench.py")
         runs = [{"fixture": "f", "arm": arm, "result": "OK", "agent_calls": n} for arm, n in (("a", 10), ("b", 14))]
         self.assertEqual(bench.compare(runs, seed=0)["fixtures"]["f"]["agent_calls"], 4)
-
-
-class ReleaseTests(unittest.TestCase):
-    def test_ac_011_release(self):
-        import upgrade
-        self.assertEqual(json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"],
-                         "2.14.0")
-        notes = " ".join(upgrade.NOTES.get("2.14.0", []))
-        for word in ("escalation", "--resume", "re-review", "fingerprint", "max_agent_calls"):
-            self.assertIn(word, notes)
-        hub = (ROOT / "docs/how-to/README.md").read_text(encoding="utf-8")
-        self.assertIn("max_agent_calls", hub)
-        self.assertIn("`escalation`", hub)
-        self.assertLessEqual(len(hub.splitlines()), 260)
-        self.assertIn("re-review", (ROOT / "docs/how-it-works.md").read_text(encoding="utf-8"))
-        self.assertEqual(sorted(p.name for p in BIN.glob("test_acceptance*.py")), ["test_acceptance_v214.py"])
-        moved = [(BIN / "test_pipeline.py", "ReviewAxesTests"), (BIN / "test_launcher.py", "ReviewAxesLaunchTests"),
-                 (BIN / "test_guardrail.py", "SharedReviewClaimTests"),
-                 (BIN / "test_manifest_check.py", "ValidateCommandTests"),
-                 (BIN / "test_definitions.py", "ReviewDefinitionTests"),
-                 (ROOT / "bench/test_variant.py", "BuildTests"), (ROOT / "bench/test_scenario.py", "ScenarioSetTests")]
-        for path, name in moved:
-            self.assertIn(f"\nclass {name}(", path.read_text(encoding="utf-8"), f"{path.name}: {name}")
 
 
 if __name__ == "__main__":
