@@ -169,12 +169,14 @@ class Pipeline:
         self.context_given = set()  # packages already re-dispatched once with the whole document
         # The review after the first full one is scoped: the confirmed findings of the packages fixed since then.
         self.reviewed, self.fixed_since_review, self.fix_count_at_review = False, set(), {}
+        # QA after its first pass re-checks the packages fixed since, unless only Standards findings were fixed.
+        self.fixed_since_qa, self.fix_count_at_qa, self.sources_since_qa = set(), {}, set()
         self.last_confirmed = {axis: [] for axis in AXES}
         self.new_pending = []  # what a re-review found that was not open: listed, never fixed in this run
         self.run = {"result": "REVIEW", "stages": [], "baseline": None, "work_packages": {}, "verification": None,
                     "review": None, "qa": None, "test_audit": None, "docs": None, "fix_cycles": 0, "pending": [],
                     "not_checked": [], "gate_denials": {}, "verification_failures": [], "agent_calls": 0,
-                    "environment_retries": []}
+                    "environment_retries": [], "qa_passes": []}
 
     # ---------- utilities ----------
     def stop(self, stage, detail, **extra):
@@ -373,8 +375,8 @@ class Pipeline:
                 return self.stop("wave 0", "the test-author returned no usable report", test_author=at)
             # Red is not enough: a test can fail only because the code does not exist yet and still pass an empty stub.
             audit = self.call("test-auditor", "test-auditor (revision)" if round_ else "test-auditor",
-                              render(self.prompts["test_auditor"], brief=brief("AT"), coverage=compact(at.get("coverage")),
-                                     rules=self.rules), "REVIEW")
+                              render(self.prompts["test_auditor"], brief=brief("AT"), coverage=compact(at.get("coverage"))),
+                              "REVIEW")
             if not audit:
                 return self.stop("wave 0", "the test-auditor returned no report")
             weak = [f for f in audit["findings"] if blocks(f, self.blocking)]
@@ -501,6 +503,8 @@ class Pipeline:
         for wp in by:
             self.fix_count[wp] = self.fix_count.get(wp, 0) + 1
         self.fixed_since_review |= set(by)
+        self.fixed_since_qa |= set(by)
+        self.sources_since_qa |= {d.get("source") for d in defects}
         return out
 
     # ---------- the budget, in model agent calls ----------
@@ -552,7 +556,7 @@ class Pipeline:
         found, truncated = callers_of(post[2] if len(post) > 2 else None)
         callers = ("" if not found else render(CALLERS_PROMPT, items=compact(found),
                                                truncated=CALLERS_TRUNCATED if truncated else ""))
-        prompts = (render(self.prompts["reviewer"], concerns=concerns, rules=self.rules, callers=callers),
+        prompts = (render(self.prompts["reviewer"], concerns=concerns, callers=callers),
                    render(self.prompts["standards_reviewer"], rules=self.rules))
         spec_r, std_r = self.parallel([
             lambda: self.call("reviewer", "reviewer", prompts[0], "REVIEW"),
@@ -600,7 +604,7 @@ class Pipeline:
         reports = dict(zip(asked, self.parallel([
             (lambda axis=axis: self.call(REVIEW_SOURCES[axis], f"{REVIEW_SOURCES[axis]} (re-review)", render(
                 self.prompts["re_review"], axis=AXIS_NAMES[axis], findings=compact(open_[axis]), diffs=diffs,
-                rules=self.rules), "REVIEW", schema=RE_REVIEW_SCHEMA))
+                rules=self.rules if axis == "standards" else ""), "REVIEW", schema=RE_REVIEW_SCHEMA))
             for axis in asked])))
         for axis in asked:
             if not reports[axis]:
@@ -632,6 +636,30 @@ class Pipeline:
             return {"stopped": self.stop("review", "files changed during the review stage (the reviewer must not write)")}
         return {"confirmed": confirmed}
 
+    def qa_stage(self):
+        """QA's pass: whole the first time. After fixes, a re-check of the packages fixed since its last pass; or no
+        call at all, its report standing, when every defect fixed since came from the standards reviewer. Returns
+        the report that stands, or None when QA gave none."""
+        run, sources = self.run, self.sources_since_qa
+        self.phase("QA")
+        mode = "full" if not run["qa"] or not sources else "kept" if sources == {"standards-reviewer"} else "scoped"
+        if mode == "full":
+            report = self.call("qa", "qa", render(self.prompts["qa"], rules=self.rules), "QA")
+        elif mode == "scoped":
+            scope = sorted(self.fixed_since_qa)
+            diffs = ", ".join(f".claude/state/runs/{wp}.fix-{n}.diff" for wp in scope
+                              for n in range(self.fix_count_at_qa.get(wp, 0) + 1, self.fix_count.get(wp, 0) + 1))
+            report = self.call("qa", "qa (re-check)", render(
+                self.prompts["qa_recheck"], wps=", ".join(scope), diffs=diffs, defects=compact(run["qa"]["defects"]),
+                rules=self.rules), "QA", resume=True)
+        if mode != "kept":
+            if not report:
+                return None
+            run["qa"] = report
+            self.fixed_since_qa, self.fix_count_at_qa, self.sources_since_qa = set(), dict(self.fix_count), set()
+        run["qa_passes"].append({"mode": mode, "status": run["qa"]["status"], "defects": len(run["qa"]["defects"])})
+        return run["qa"]
+
     def judge(self, post):
         plan, run = self.plan, self.run
         while True:
@@ -661,11 +689,9 @@ class Pipeline:
                 return reviewed["stopped"]
             confirmed = reviewed["confirmed"]
 
-            self.phase("QA")
-            qa = self.call("qa", "qa", render(self.prompts["qa"], rules=self.rules), "QA")
+            qa = self.qa_stage()
             if not qa:
                 return self.stop("qa", "QA returned no report")
-            run["qa"] = qa
 
             def blocking_impl(d):
                 return d["kind"] == "implementation" and blocks(d, self.blocking)
@@ -722,7 +748,7 @@ class Pipeline:
         if not self.ok(self.step({"steps": steps}, i)):
             note("the documentation stage could not be opened")
             return
-        doc = self.call("doc-updater", "doc-updater", render(self.prompts["doc_updater"], rules=self.rules), "DOCS")
+        doc = self.call("doc-updater", "doc-updater", self.prompts["doc_updater"], "DOCS")
         fin = self.seq([f"close-stage docs DOCS={'done' if doc and doc.get('status') == 'DONE' else 'blocker'}", "docs-check"],
                        "close-stage docs")
         close, check = self.step(fin, 0), self.step(fin, 1)
