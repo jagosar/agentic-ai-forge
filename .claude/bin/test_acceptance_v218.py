@@ -153,7 +153,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_ac_006_release_2_18_0(self):
         plugin = json.loads(self.read(".claude-plugin/plugin.json"))
-        self.assertEqual(plugin["version"], "2.18.0")
+        self.assertEqual(plugin["version"], "2.18.1")
         notes = load("upgrade_v218", BIN / "upgrade.py").NOTES["2.18.0"]
         self.assertGreaterEqual(len(notes), 2)
         for words in ("hook", "flow-budget.json"):

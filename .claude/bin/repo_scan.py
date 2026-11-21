@@ -9,7 +9,6 @@ import urllib.parse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import compat  # noqa: E402  - the operating-system layer, next to this file
 from core import (  # noqa: E402
     ARCHIVE_DIR, DEFAULT_CODEMAP, ManifestError, ROOT, RULES_DIR, RULES_LIBRARY, SKIP_DIRS, codemap_path, die,
     docs_entity, ledger_stage, load_manifest, owns, source_files, symbol_re
@@ -78,10 +77,6 @@ def render_rules(paths, root):
 
 def rules_text(manifest):
     return render_rules(rule_files(manifest), ROOT)
-
-def rules_hint(manifest):
-    files = rule_files(manifest)
-    return f" Rules you must follow (language and common): {', '.join(files)}." if files else ""
 
 def wanted_rules():
     """The rule names rules_sync installs: "common" plus each declared or detected language with a file in the
@@ -179,7 +174,7 @@ def changed_code_files():
     found = set()
     for rel in modified + untracked:
         rel = rel.replace("\\", "/")
-        if set(rel.split("/")[:-1]) & SKIP_DIRS or rel.startswith(".claude/state/") or symbol_re(rel) is None:
+        if set(rel.split("/")[:-1]) & SKIP_DIRS or symbol_re(rel) is None:
             continue
         if (ROOT / rel).is_file():
             found.add(rel)
@@ -219,7 +214,7 @@ def find_callers(changed, symbols):
     per_name = {n: re.compile(CALLER_RE_TEMPLATE % re.escape(n)) for n in names}
     hits = {n: [] for n in names}
     for rel in source_files():
-        if rel in changed_set or symbol_re(rel) is None or rel.startswith(".claude/state/"):
+        if rel in changed_set or symbol_re(rel) is None:
             continue
         try:
             text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
@@ -306,7 +301,7 @@ def docs_check(manifest):
                 if not target.exists():
                     broken.append({"file": rel, "line": n, "target": link, "kind": "link"})
                 elif (frag and target.suffix == ".md"
-                      and frag not in heading_anchors(target.read_text(encoding="utf-8"))):
+                      and frag not in heading_anchors(target.read_text(encoding="utf-8", errors="replace"))):
                     broken.append({"file": rel, "line": n, "target": link, "kind": "anchor"})
             for cited in PATH_RE.findall(line):
                 first = cited.split("/", 1)[0]

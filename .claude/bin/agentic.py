@@ -250,11 +250,13 @@ def cmd_save_result(args):
         data = json.loads(src.read_text(encoding="utf-8")) if src else json.loads(compat.read_stdin_text())
     except json.JSONDecodeError as e:
         die(f"save-result: not valid JSON: {e}")
-    if src:
-        src.unlink()
+    if not isinstance(data, dict):
+        die("save-result: the workflow's result is a JSON object.")
     out = STATE / "runs" / "workflow-result.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    if src:
+        src.unlink()  # only once it is saved
     print(f"Saved to {out.relative_to(ROOT)} (result: {data.get('result', '?')})")
 
 
