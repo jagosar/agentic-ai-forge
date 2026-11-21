@@ -63,8 +63,6 @@ LOST = ("the gatekeeper returned no usable result (a timeout or garbled output);
         "check `agentic.py status` before resuming")
 
 
-
-
 class Halted(BaseException):
     """Someone ran `agentic.py stop`: not an error of an agent, so it is not swallowed with them."""
 
@@ -94,7 +92,6 @@ def wave_states(wp_ids, reports):
 
 def gate_line(output):
     """The stop gate's denials in a close-stage output ("GATE: WP-01=1 WP-02=0"), per package; {} if absent."""
-    import re
     m = re.search(r"^GATE: (.*)$", str(output or ""), re.M)
     return {k: int(v) for k, v in re.findall(r"(WP-\d+)=(\d+)", m.group(1))} if m else {}
 
@@ -239,7 +236,6 @@ class Pipeline:
 
     @staticmethod
     def changed_by(out, ident):
-        import re
         m = re.search(rf"^{ident}: \d+ file\(s\) changed(?:: (.*))?$", str(out or ""), re.M)
         return None if not m else (m.group(1).split(", ") if m.group(1) else [])
 
@@ -367,7 +363,7 @@ class Pipeline:
             state = "done" if at and at.get("status") == "DONE" else "blocker"
             close = self.step(self.seq([f"close-stage acceptance AT={state} --expect red"], "close-stage acceptance"), 0)
             self.run["stages"].append({"stage": "wave 0 (revision)" if round_ else "wave 0", "ok": self.ok(close),
-                                       "test_author": at, "check": close and close["output"]})
+                                       "test_author": at, "check": close["output"]})
             if not self.ok(close):
                 return self.stop("wave 0", "the test-author cannot test some criterion: architecture.md needs review"
                                  if at and at.get("status") == "BLOCKER"
@@ -453,7 +449,7 @@ class Pipeline:
         if not pending:
             return reports
         second = dict(zip([wp for wp, _ in pending], self.parallel([th for _, th in pending])))
-        return [second.get(wp, rep) if wp in second else rep for wp, rep in zip(wp_ids, reports)]
+        return [second.get(wp, rep) for wp, rep in zip(wp_ids, reports)]
 
     def run_waves(self, waves, by_wave, defects_by_wp, opened):
         fixing = bool(defects_by_wp)
@@ -473,7 +469,7 @@ class Pipeline:
                 return {"stopped": self.stop(f"fix wave {wave}" if fixing else f"wave {wave}", LOST)}
             good = self.ok(close)
             self.run["stages"].append({"stage": f"wave {wave} (fix)" if fixing else f"wave {wave}", "ok": good,
-                                       "check": close and close["output"]})
+                                       "check": close["output"]})
             for wp, n in gate_line(close["output"]).items():
                 if n:
                     self.run["gate_denials"][wp] = self.run["gate_denials"].get(wp, 0) + n
@@ -714,6 +710,9 @@ class Pipeline:
         """Living documentation. `steps`: the [codemap, open-stage docs] results that came with the call that closed QA."""
         run, plan = self.run, self.plan
         self.phase("Documentation")
+
+        def note(problem, severity="medium", **more):
+            run["pending"].append({"type": "documentation", "severity": severity, "problem": problem, **more})
         run["docs"] = {"codemap": None, "report": None, "ownership_ok": False, "check": None}
         i = 0
         if plan.get("codemap"):
@@ -721,8 +720,7 @@ class Pipeline:
             i += 1
             run["docs"]["codemap"] = lines_json(cm["output"]) if self.ok(cm) else None
         if not self.ok(self.step({"steps": steps}, i)):
-            run["pending"].append({"type": "documentation", "severity": "medium",
-                                   "problem": "the documentation stage could not be opened"})
+            note("the documentation stage could not be opened")
             return
         doc = self.call("doc-updater", "doc-updater", render(self.prompts["doc_updater"], rules=self.rules), "DOCS")
         fin = self.seq([f"close-stage docs DOCS={'done' if doc and doc.get('status') == 'DONE' else 'blocker'}", "docs-check"],
@@ -732,24 +730,18 @@ class Pipeline:
         run["docs"]["ownership_ok"] = self.ok(close)
         run["docs"]["check"] = lines_json(check["output"]) if check else None
         if self.ok(close) and not run["docs"]["check"]:
-            run["pending"].append({"type": "documentation", "severity": "medium",
-                                   "problem": "the documentation check did not run or its output could not be read"})
+            note("the documentation check did not run or its output could not be read")
         run["stages"].append({"stage": "documentation", "ok": run["docs"]["ownership_ok"] and self.ok(check),
-                              "check": close and close["output"]})
+                              "check": close["output"]})
         ghost = self.unchanged_claims(doc, close and close["output"], "DOCS")
         if doc and doc.get("status") == "DONE" and ghost:
-            run["pending"].append({"type": "documentation", "severity": "medium",
-                                   "problem": "the doc-updater claims changes that are not on disk", "files": ghost})
+            note("the doc-updater claims changes that are not on disk", files=ghost)
         if not doc or doc.get("status") != "DONE":
-            run["pending"].append({"type": "documentation", "severity": "medium",
-                                   "problem": f"doc-updater blocked: {doc.get('blocker')}" if doc else "the doc-updater returned no report"})
+            note(f"doc-updater blocked: {doc.get('blocker')}" if doc else "the doc-updater returned no report")
         elif not run["docs"]["ownership_ok"]:
-            run["pending"].append({"type": "documentation", "severity": "high",
-                                   "problem": "the doc-updater wrote outside its zone (see docs.check)"})
+            note("the doc-updater wrote outside its zone (see docs.check)", "high")
         broken = (run["docs"]["check"] or {}).get("broken") or []
         if broken:
-            run["pending"].append({"type": "documentation", "severity": "medium",
-                                   "problem": f"{len(broken)} broken link(s) or path(s) in the documentation", "broken": broken})
+            note(f"{len(broken)} broken link(s) or path(s) in the documentation", broken=broken)
         if doc and doc.get("unverified"):
-            run["pending"].append({"type": "documentation", "severity": "low",
-                                   "problem": "claims the doc-updater could not verify", "unverified": doc["unverified"]})
+            note("claims the doc-updater could not verify", "low", unverified=doc["unverified"])
