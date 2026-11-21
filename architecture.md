@@ -1,325 +1,333 @@
-# Architecture: guardrails that keep the flow lean, and a fast hook (agentic-flow 2.18.0)
+# Architecture: fewer tokens after a fix, and rules only where they are used (agentic-flow 2.19.0)
 Type: change · Size: standard
 
 ## 1. Goal
-The flow doubled its code between 2.0.0 and 2.17.0, from 3,214 to 6,481 lines of Python outside the tests in `.claude/bin` (7,120 with the workflow's JavaScript, the measure of section 5), and its prompts grew 31 %. Nothing watched the totals. In 2.17.0 a regression slipped in unseen: the PreToolUse hook, which runs on every tool call of every agent, imports the whole of `agentic.py`, including `launch.py`, which now loads `http.client`.
 
-This design adds four deterministic guardrails to the flow's own tests, so the flow cannot grow, slow down or take on debt without a visible decision:
-- the standard library only;
-- an import budget for the hook;
-- a size budget;
-- no unreferenced debt markers.
-
-It also makes the hook load only the guard: 100 ms per call on today's code, against 58 ms with the guard alone, measured in this container. Measuring run cost with the bench and trimming prompts is the next release ("diet 2"), out of scope here.
+A review of the flow against the bench's own records (12 sessions, 2.14.0 against 2.18.0) showed where a run spends without gaining anything. After a fix cycle QA repeats its whole pass, while the reviewers already re-review only what the fix touched; and the coding rules are printed in the prompt of three agents whose definitions say they do not judge by them. This release gives QA a scoped re-check after a fix, keeps QA's first report when the fix only closed Standards findings, and prints the rules only for the agents that use them. Both engines change together and stay equivalent. The saving is measured with an A/B against 2.18.1 before the release is proposed.
 
 ## 2. Scope
+
 ### Included
-- **Fast hook.** `agentic.py hook` (what `hook.py` runs) handles the `hook` command before the module-level imports of the other domains: it imports `core`'s `die`/`root_drift`, then `guardrail.hook`, and nothing else of the flow.
-- **Guardrail 1: standard library only.** Every `import`/`from … import` in `.claude/bin/*.py` and every `require(...)`/`import … from` in `.claude/workflows/*.js` names a standard-library module, a module of `.claude/bin` itself, or a Node built-in.
-- **Guardrail 2: hook import budget.** Running `hook.py` with a payload must not load any of `HOOK_FORBIDDEN_MODULES` (section 5), checked from `python3 -X importtime`.
-- **Guardrail 3: size budget.** `.claude/flow-budget.json` records the code lines and prompt bytes of the flow, as measured in section 5:
-  - a test fails when either measure is above its budget, or more than 5 % below it;
-  - raising or lowering the budget is a one-file change, with a `why` that the test requires to be non-empty.
-- **Guardrail 4: debt markers.** No `TODO`, `FIXME`, `XXX` or `HACK` in `.claude/bin/*.py` or `.claude/workflows/*.js` unless the same line names an issue (`#123` or `issue 123`).
-- **Release 2.18.0:**
-  - `test_acceptance_v218.py`;
-  - `test_acceptance_v217.py`'s classes moved to `test_field_fixes.py`, and the old file deleted;
-  - notes, version, docs.
+
+- **A scoped QA re-check.** After a fix cycle, QA is asked to re-check the packages fixed since its last pass, against the fixes' diffs and the defects of its last report, with a new prompt `qa_recheck`. In the fallback engine that call continues QA's session.
+- **No second QA for a Standards-only fix.** When every defect of every fix cycle since QA's last pass came from the standards reviewer, QA is not launched again: its last report stands.
+- **A record of QA's passes.** `run["qa_passes"]` says, per pass, whether QA ran whole, scoped, or was kept.
+- **Rules only where used.** The printed rules leave the prompts of the test-auditor, the doc-updater, the Spec reviewer and the Spec axis of a re-review.
+- **doc-updater.** It no longer checks links (`docs-check` runs right after it) and says nothing about a CHANGELOG that is outside its zone.
+- **Release 2.19.0**: notes, docs, the budget, one acceptance file.
+- **Measurement.** `bench.py ab` of `agentic-flow--v2.18.1` against this branch, fixture `tally`, 5 sessions per arm, committed with the release.
 
 ### Excluded (non-goals)
-- **Bench measurement of 2.17 against 2.14 and prompt trimming:** the next release.
-- **Timing tests.** No test asserts milliseconds; CI timings are noisy. The import budget is the deterministic proxy.
-- **Lazy imports for the other commands.** `agentic.py seq` and the rest keep loading every module.
-- **A dead-code detector:** too many false positives (callers in tests and in JavaScript).
-- **No change to `hook.py`**, which is never owned, or to the guard's decisions.
+
+- Merging gatekeeper calls (10 to 8 per run): a small saving, not measured, that costs the difference between "wave N" and "verification" when a call is lost. The user left it out.
+- Trimming QA's rules to their security list: it needs code to cut a section out of a rules file.
+- Skipping the first QA when the review already blocks: the bench keeps only QA's last report, so its cost in quality cannot be judged. `qa_passes` makes that visible for a later decision.
+- Whether Claude Code also loads `.claude/rules/` into each agent, so the printed rules arrive twice. Not confirmed: see section 11.
+- Session resume in the native workflow (it has none, as for fix attempts).
+- The budget's count of agent calls (`budget_for_cycle`): it keeps counting one QA call per cycle, which is an upper bound.
 
 ## 3. Stack
-Python 3.9+ (the standard library only), Node 20+ for the workflow harness. Commands, as in CI:
-- `python3 -m unittest discover -s .claude/bin -p "test_*.py"`
-- `node .claude/bin/test_workflow.mjs`
-- `python3 -m unittest discover -s bench -p "test_*.py"`
-- `python3 -m unittest discover -s bench/acceptance`
-- `python3 -m unittest discover -s acceptance`
-- `python3 -m unittest discover -s qa`
-- `python3 .claude/bin/agentic.py quality`, `docs-check` and `flow-history --check`
 
-Run `export CLAUDE_PROJECT_DIR=$PWD` before them.
+Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workflow.mjs`. No package manager, no new dependency.
+
+- Unit and acceptance: `python3 -m unittest discover -s .claude/bin -p "test_*.py"`
+- The workflow against the conformance scenarios: `node .claude/bin/test_workflow.mjs`
+- Quality limits: `python3 .claude/bin/agentic.py quality`
+- Bench: `python3 -m unittest discover -s bench -p "test_*.py"` and `python3 -m unittest discover -s bench/acceptance`
 
 ## 4. Repository structure
+
 ```
-.claude/bin/agentic.py                   WP-01  the hook fast path
-.claude/bin/test_hook_path.py            WP-01  guardrail 2 (new)
-.claude/bin/test_lean.py                 WP-02  guardrails 1, 3 and 4 (new)
+.claude/workflows/pipeline-spec.json     WP-01  prompts: qa_recheck added; {rules} removed from three
+.claude/bin/pipeline.py                  WP-01  the QA decision, the rules per agent
+.claude/bin/launch.py                    WP-01  QA's session is kept for a resume
+.claude/bin/conformance.json             WP-01  new scenarios (shared by both engines)
+.claude/bin/test_pipeline.py             WP-01
+.claude/bin/test_launcher.py             WP-01
+.claude/bin/test_fix_cycles.py           WP-01  a pinned count of resumed calls
+.claude/workflows/agentic-implement.js   WP-01  the same decision and prompts
+.claude/bin/test_workflow.mjs            WP-01
+.claude/agents/qa.md                     WP-02  a "# Re-check" section
+.claude/agents/doc-updater.md            WP-02
+.claude/agents/reviewer.md               WP-02
+.claude/commands/implement.md            WP-02  how to present QA's passes
+.claude/bin/test_definitions.py          WP-02
 docs/how-it-works.md                     WP-03
-docs/how-to/plugin.md                    WP-03  the maintainer's release steps
-.claude-plugin/plugin.json               WP-03  2.18.0
-.claude/bin/upgrade.py                   WP-03  NOTES["2.18.0"]
-.claude/bin/test_field_fixes.py          WP-03  moved from test_acceptance_v217.py (new)
-.claude/bin/test_acceptance_v217.py      WP-03  deleted
-.claude/flow-budget.json                 WP-03  the size budget (new), written after every code change
-.claude/flow-history.json                WP-03  regenerated as the PR's last commit
-.claude/bin/test_acceptance_v218.py      AT     (new)
+.claude-plugin/plugin.json               WP-03  2.19.0
+.claude/bin/upgrade.py                   WP-03  NOTES["2.19.0"]
+.claude/flow-budget.json                 WP-03
+.claude/quality-baseline.json            by hand: the workflow script's recorded size
+.claude/bin/test_lean_hook.py            WP-03  the classes moved from test_acceptance_v218.py
+.claude/bin/test_acceptance_v218.py      WP-03  deleted
+.claude/flow-history.json                by hand: regenerated as the last commit
+.claude/bin/test_acceptance_v219.py      AT
+bench/results/                           by hand: the A/B's files
 ```
 
 ## 4b. Existing code context
-| What an implementer needs to know | Where it is (`file:lines`) | Pattern or rule | Source |
-|---|---|---|---|
-| `hook.py` runs `agentic.py` through `runpy.run_path(script, run_name="__main__")` with `sys.argv = [script, "hook"]`; it never imports `agentic.py` itself | `.claude/bin/hook.py:1-29` | The fast path keys on `__name__ == "__main__"` and `sys.argv[1:2] == ["hook"]` | read |
-| `agentic.py` puts its folder on `sys.path`, imports `compat`, then every domain module (core, manifest_check, repo_scan, verification, stage, installer, launch, guardrail) at module level | `.claude/bin/agentic.py:73-100` | Insert the fast path right after `import compat` (line 78), before `from core import` | read |
-| `main()` calls `compat.utf8_stdio()`, refuses a `root_drift()` problem with `die`, then dispatches; `hook` is not in `ROOT_FREE_COMMANDS` | `.claude/bin/agentic.py:395-414` | The fast path must do the same two steps before `hook()`, so behaviour is unchanged | read |
-| `guardrail.hook()` reads stdin, records the heartbeat, guards, and always ends in `sys.exit(0)` (or `block`, which exits 2) | `.claude/bin/guardrail.py:579-593` | The fast path never returns: no code after `hook()` runs | read |
-| `guardrail` imports `stage`, which imports `reports` (xml) and `verification` for the stop gate | `.claude/bin/stage.py:14-23` | These stay on the hook path; they are not in the forbidden list | read |
-| Measured in this container: `hook.py` loads brief, manifest_check, repo_scan, installer, findings, launch, ssl, http.client, urllib.request, email.parser; a guard-only path loads none of them; 100 ms against 58 ms per call (20 calls each) | not a file: `python3 -X importtime` and timing runs here | `HOOK_FORBIDDEN_MODULES` is that list | inferred |
-| The quality ratchet's limits and baseline, which watch each function and file, not totals | `.claude/bin/quality.py:18-19`, `.claude/bin/quality.py:59` | The size budget is a separate, simpler file; do not extend `quality-baseline.json`, which only a person writes and the installer creates in projects | read |
-| `test_definitions.py` imports `agentic`, defines `FLOW_REPO_ONLY` from `agentic.is_flow_repo(ROOT)` | `.claude/bin/test_definitions.py:8-28` | New test files define `FLOW_REPO_ONLY` the same way | read |
-| The command table is pinned at 37 and to the docstring | `.claude/bin/test_definitions.py:504-507` | No command is added here: the count stays 37 | read |
-| The previous release's acceptance file and how 2.17.0 moved 2.16.0's classes | test_acceptance_v217.py (its classes at lines 96-392 before this change deletes it), `.claude/bin/test_hook_diagnosis.py:1-10` | Move every class but `ReleaseTests`; `DocsTests` gets `FLOW_REPO_ONLY` | read |
-| At most one `test_acceptance*.py` in `.claude/bin` | `.claude/bin/test_layout.py:1-22` | Delete `test_acceptance_v217.py` in the same change | read |
-| Upgrade notes, newest first | `.claude/bin/upgrade.py:156-170` | Add `"2.18.0"` above `"2.17.0"` | read |
-| The ratchet paragraph in the reference | `docs/how-it-works.md:253` | Add the flow's own guardrails after it | read |
-| The maintainer's release steps (flow-history as the last commit) | `docs/how-to/plugin.md:110-120` | Add the budget step there | read |
-| What install ships: `.claude/bin/*.py` modules listed by name, agents, commands, workflows, rules; the test suite where any part is present; no `.claude/*.json` at the root | `.claude/bin/installer.py:30-46` | `flow-budget.json` is not shipped; tests that read it are `FLOW_REPO_ONLY` | read |
 
-What must **not** change:
-- the hook's decisions, its exit codes and its heartbeat;
-- what `hook.py` runs;
-- any other command's behaviour or output.
+| What an implementer needs to know | Where it is | Pattern or rule | Source |
+|---|---|---|---|
+| The judge loop: verification, review, QA, then a fix cycle or the end. QA is one `self.call("qa", "qa", …, "QA")`; its report replaces `run["qa"]` | `.claude/bin/pipeline.py:635-707` | The loop to change; everything after `run["qa"] = qa` stays as it is | read |
+| The same loop in the workflow | `.claude/workflows/agentic-implement.js:731-797` | Must make the same calls with the same prompts | read |
+| The re-review: scope is `fixed_since_review`, the diffs are `.claude/state/runs/<WP>.fix-<n>.diff` for every fix since the last review, one call per axis with open findings, label `<agent> (re-review)` | `.claude/bin/pipeline.py:590-625`, `.claude/workflows/agentic-implement.js:609-629` | The pattern the QA re-check copies: a set of packages fixed since, a count of fixes at the last pass, reset when the pass runs | read |
+| `reviewed_now` resets `fixed_since_review` and copies `fix_count` | `.claude/bin/pipeline.py:541-544` | The reset to mirror for QA | read |
+| A fix cycle groups defects by package, adds one to `fix_count` per package and adds the packages to `fixed_since_review` | `.claude/bin/pipeline.py:489-504` | Where the packages and defects fixed since QA's last pass are recorded | read |
+| Every defect sent to a fix carries `source`: `reviewer`, `standards-reviewer`, `qa` or `verification` | `.claude/bin/pipeline.py:672-673`, `.claude/bin/pipeline.py:288` | The Standards-only test reads `source` | read |
+| `call(agent_type, label, prompt, id, model, resume, schema)` counts the call and passes only truthy options to the engine's agent | `.claude/bin/pipeline.py:214-226` | `resume=True` is how a fix attempt continues its session | read |
+| A fix attempt asks for `{"resume": True}` | `.claude/bin/pipeline.py:427-433` | The same option for the QA re-check | read |
+| The fallback keeps a session, and what it cost, only for the idents in `packages` | `.claude/bin/launch.py:558-575`, `.claude/bin/launch.py:626` | Add `"QA"` to that set; a resumed call that gives no report already falls back to a fresh one | read |
+| `render` replaces only the names it is given and leaves an unknown `{name}` as it is | `.claude/bin/pipeline.py:39-41` | A prompt without `{rules}` renders the same with or without `rules=` | read |
+| The rules text and how it arrived (`printed`, `pointed`, `none`) | `.claude/bin/pipeline.py:141-147`, `.claude/workflows/agentic-implement.js:544-550` | Unchanged | read |
+| Where each prompt takes the rules today | `.claude/bin/pipeline.py:358-411`, `.claude/bin/pipeline.py:555-556`, `.claude/bin/pipeline.py:603`, `.claude/bin/pipeline.py:665`, `.claude/bin/pipeline.py:725` | Remove the argument only where section 6 says | read |
+| The workflow's literals for the same prompts | `.claude/workflows/agentic-implement.js:370`, `.claude/workflows/agentic-implement.js:567-568`, `.claude/workflows/agentic-implement.js:623-628`, `.claude/workflows/agentic-implement.js:706`, `.claude/workflows/agentic-implement.js:762` | Text equal to the spec's, character by character | read |
+| The one-off commands (`run-review`, `run-docs`) render the spec's prompts through `render_prompt` | `.claude/bin/launch.py:302-307` | They follow the spec with no change of their own | read |
+| The spec's prompts and their placeholders | `.claude/workflows/pipeline-spec.json:1-40` | One line per prompt; `{rules}` is always last | read |
+| A conformance scenario is a name plus the answers each agent gives, in order; both engines run all of them and every prompt and result must match | `.claude/bin/conformance.json:1-40`, `.claude/bin/test_pipeline.py:139-225` | New behaviour needs a scenario. `summarize` builds the summary, and the `keys` tuple at `.claude/bin/test_pipeline.py:220-222` decides which of its keys are compared | read |
+| `ConformanceTests` runs `node test_workflow.mjs --dump` and compares it with the Python engine's summaries | `.claude/bin/test_pipeline.py:203-225` | The two engines can only be green together, so they are one package | read |
+| The node side builds the same summary | `.claude/bin/test_workflow.mjs:498-617` | Add `qa_passes` to both summaries and to the `keys` tuple | read |
+| The quality limits: a function of at most 60 lines, and per file a count of lines over 120 characters that may not rise. `Pipeline.judge` is 73 lines and the workflow's `runAfterPlan` is capped at 128, both recorded in the baseline as they are | `.claude/bin/quality.py:18-19`, `.claude/quality-baseline.json:1-113` | Neither function may grow by one line; the long-line counts of `pipeline.py`, `agentic-implement.js` and `test_pipeline.py` may not rise | read |
+| Two tests pin that the reviewer's prompts carry the rules ("printed rules reach the writers and judges only", and "the implementer can be left without the rules" right after it) | `.claude/bin/test_pipeline.py:459-476` | Tests to update (WP-01): the reviewer leaves those lists; the standards reviewer stays | read |
+| An end-to-end test of the fallback with `FAKE_RESUME_FAILS` pins `agent_calls == len(calls) - 1`: one resumed call fails and runs again | `.claude/bin/test_fix_cycles.py:163-185` | Test to update (WP-01): its run fixes a Spec finding, so QA's re-check is resumed too and also fails once; the expected value becomes `len(calls) - 2`, and the message names both retries | read |
+| The scripted agents of the tests take no extra options | `.claude/bin/test_pipeline.py:260-335` | A call with `resume=True` raises `TypeError` there, which the engine reports as "QA returned no report": the helpers must accept `**opts` | read |
+| The guide says the workflow hands the rules "to each agent" | `docs/how-it-works.md:401` | Line to correct (WP-03) | read |
+| The acceptance tests of 2.18.0 and their helpers (`temp_dir`, `module`, `load`, `write`, `FORBIDDEN`, `PAYLOAD`, `MARK`) | `.claude/bin/test_lean_hook.py:1-50` (where the 2.18.0 acceptance file ends up) | The helpers move with the classes (WP-03) | read |
+| A test pins `{rules}` in the `re_review` prompt | `.claude/bin/test_definitions.py:652-657` | Stays true: the prompt keeps the placeholder, the Spec axis renders it empty | read |
+| A test pins "the rules printed in your prompt" in implementer, test-author and qa | `.claude/bin/test_definitions.py:645-649` | Stays true: none of the three loses the rules | read |
+| The reviewer's definition tells it to read the printed rules | `.claude/agents/reviewer.md:23` | Reword (WP-02): it no longer receives them | read |
+| QA's process, step by step | `.claude/agents/qa.md:25-38` | The re-check is a new section after it, as the reviewers have "# Re-review" | read |
+| doc-updater steps 4 and 5 | `.claude/agents/doc-updater.md:30-35` | The two lines to change | read |
+| The release pattern: notes, one acceptance file, the previous one's classes moved | `.claude/bin/upgrade.py:156-170`, `.claude/bin/test_field_fixes.py:1-10` | Mirror for WP-03 | read |
+| Design 0020 printed the rules for every agent that writes or judges code | `docs/architecture/0020-reliable-review.md:228` | The decision this design narrows (section 10) | read |
+
+What must not change: the schemas, the review, the verifier, the fix limit, the budget's arithmetic, every stage command and their order, `run["qa"]` as QA's last report.
 
 ## 5. Data model
+
+The engine's new state (Python names; the workflow uses the same in camelCase):
+
 ```python
-# test_hook_path.py
-HOOK_FORBIDDEN_MODULES = ("launch", "installer", "manifest_check", "repo_scan", "brief", "findings",
-                          "http.client", "ssl", "urllib.request", "email.parser")
-
-# .claude/flow-budget.json
-{"code_lines": 7130, "prompt_bytes": 99000, "why": "2.18.0: first budget, the flow as measured at 2.17.0 plus the fast hook"}
-# The values above are an example; WP-03 writes it last, after the notes in upgrade.py, with the measured values
-# rounded up to the next 10 (lines) and 100 (bytes).
-
-# The measures (test_lean.py):
-# code_lines   = lines of .claude/bin/*.py whose name does not start with "test" (testutil.py excluded too)
-#                + lines of .claude/workflows/*.js
-# prompt_bytes = bytes of .claude/agents/*.md + .claude/commands/*.md + .claude/rules-library/*.md
-# Measured on this branch before any change: 21 code files, 7120 lines; 24 prompt files, 98956 bytes.
-BUDGET_SLACK = 0.05
-# budget_problems, for each measure m with budget b:
-#   m > b                       -> "<name> is <m>, above its budget <b> in flow-budget.json: raise it, with a why"
-#   m < b * (1 - BUDGET_SLACK)  -> "<name> is <m>, more than 5 % below its budget <b> in flow-budget.json: lower it"
-#   a missing file              -> "flow-budget.json is missing"
-#   a missing or blank "why"    -> "flow-budget.json needs a why"
-DEBT_RE = r"\b(TODO|FIXME|XXX|HACK)\b"     # built from parts in the test so the test file never matches itself
-ISSUE_RE = r"#\d+|\bissue \d+"
+self.fixed_since_qa: set[str] = set()      # packages fixed since QA's last pass
+self.fix_count_at_qa: dict[str, int] = {}  # fix_count when QA last ran
+self.sources_since_qa: set[str] = set()    # the "source" of every defect fixed since QA's last pass
 ```
+
+The run record gains one key:
+
+```python
+run["qa_passes"]: list[dict]  # one per time the loop reaches QA
+# {"mode": "full" | "scoped" | "kept", "status": <QA's status>, "defects": <len of its defects>}
+# "kept": QA was not launched; status and defects are those of the report that stands.
+```
+
+`run["qa"]` stays QA's last report.
 
 ## 6. Contracts between modules
-```python
-# agentic.py, right after `import compat`:
-if __name__ == "__main__" and sys.argv[1:2] == ["hook"]:  # every tool call runs this: load only the guard
-    from core import die as _die, root_drift as _root_drift
-    compat.utf8_stdio()
-    _problem = _root_drift()
-    if _problem:
-        _die(_problem)
-    from guardrail import hook as _hook
-    _hook()  # never returns: it exits 0, or 2 when it blocks
 
-# test_hook_path.py
-def hook_copy(test):
-    """A temporary git repo (git init, removed by test.addCleanup) holding copies of this branch's .claude/bin/,
-    .claude/settings.json and .claude/agents/, and architecture.md with test_agentic.MANIFEST. Returns its Path.
-    test_agentic.Repo does not copy .claude/bin, so this helper does."""
+**The spec's prompts** (`pipeline-spec.json`, read by the Python engine; the workflow holds the same text as literals):
 
-def hook_modules(project, payload, env=None):
-    """(returncode, stderr, modules) of `python3 -X importtime <project>/.claude/bin/hook.py` with payload (a dict,
-    sent as JSON on stdin) and CLAUDE_PROJECT_DIR=project. modules is a set of names, from the stderr lines that
-    start with 'import time:', skipping the header line ('import time: self [us] | cumulative | imported package')
-    and stripping each name's indentation; stderr is the other lines."""
+- `test_auditor`, `reviewer`, `doc_updater`: the same text without the trailing `{rules}`.
+- `re_review`: unchanged. The engine renders `{rules}` as the rules for the Standards axis and as the empty string for the Spec axis.
+- `qa`, `implement`, `implement_full`, `fix`, `test_author`, `test_author_revision`, `standards_reviewer`: unchanged.
+- New, `qa_recheck`:
 
-# test_lean.py
-def code_lines(root): ...      # section 5; len(text.splitlines()) per file; a missing folder counts 0
-def prompt_bytes(root): ...    # section 5; a missing folder counts 0
-def third_party_imports(root): # sorted [(file, module)], file posix relative to root: neither stdlib, local nor
-                               # node built-ins. JS specifiers: the quoted string inside require( ... ), and the
-                               # quoted string after `from` on a line starting with import; one starting with '.' is local
-def unreferenced_markers(root):# [(file, line_no, text)]: file posix relative to root, text the line stripped
-def budget_problems(root):    # [message] comparing code_lines/prompt_bytes with root/.claude/flow-budget.json (section 5)
 ```
-The acceptance tests may import `test_hook_path` and `test_lean` and call these functions. Python's standard-library names come from `sys.stdlib_module_names` (3.10+); on 3.9 the stdlib test skips, because the other CI jobs run 3.12 and 3.14. Node built-ins come from `require("module").builtinModules`; the check reads the list by running `node -e`, and skips when `node` is missing.
+Re-check the system after a fix, according to architecture.md. Packages fixed since your last pass: {wps}. The fixes' diffs are {diffs}: read them and the code they changed. Your last report listed these defects, as JSON:
+{defects}
+Run the tests in your zone and the full suite again, and add tests only for what the diffs changed. Report every defect that is still open, from that list or new, with the same fields; leave out the ones the fix closed. Do not repeat the rest of your first pass.{rules}
+```
+
+`{wps}`: the packages of `fixed_since_qa`, sorted, joined with `", "`. `{diffs}`: `.claude/state/runs/<WP>.fix-<n>.diff` for each of those packages, sorted, and each `n` from `fix_count_at_qa[wp] + 1` to `fix_count[wp]`, joined with `", "` (the re-review's rule). `{defects}`: the compact JSON of `run["qa"]["defects"]`. `{rules}`: the rules.
+
+**The QA decision**, the same in both engines, where the loop reaches QA:
+
+1. No QA report yet in this run: the `qa` prompt, label `qa`. Mode `full`.
+2. A report exists and `sources_since_qa == {"standards-reviewer"}`: no call. `run["qa"]` stays. Mode `kept`. `fixed_since_qa`, `fix_count_at_qa` and `sources_since_qa` are not reset, so a later re-check covers these fixes too.
+3. A report exists and `sources_since_qa` holds any other source: the `qa_recheck` prompt, label `qa (re-check)`, the QA schema, ident `QA`, and `resume=True` in the Python engine. Mode `scoped`. A missing report stops the run as today (`stop("qa", "QA returned no report")`).
+4. A report exists and `sources_since_qa` is empty (the loop only returns to QA after a fix cycle, so this is not expected): as rule 1, mode `full`.
+5. After a call (modes `full` and `scoped`): `fixed_since_qa = set()`, `fix_count_at_qa = dict(fix_count)`, `sources_since_qa = set()`.
+6. Every mode appends to `run["qa_passes"]`.
+7. In mode `kept` the stage commands do not change: `open-stage qa` and `close-stage qa QA=…` run as today, with no agent between them. The stage check only looks at what was written, so an untouched QA zone closes clean; no guard is added.
+
+`fix_cycle(defects, opened)` adds the cycle's packages to `fixed_since_qa` and the `source` of each of its defects to `sources_since_qa`.
+
+Everything after QA (the defects that go to a fix, pending, `close-stage qa QA=…`, the documentation) reads `run["qa"]` exactly as today, in the three modes.
+
+**The fallback's sessions** (`launch.py`): `resuming(launch, set(wps(manifest)) | {"QA"})`. No other change: a resumed QA that gives no report runs once more fresh, and its cost is its own (2.18.1).
+
+**The summary compared by the conformance tests** gains `"qa_passes"`: the list of modes, in order. It is added to `summarize` in `test_pipeline.py` and in `test_workflow.mjs`, and to the `keys` tuple at `.claude/bin/test_pipeline.py:220-222`.
+
+**The new conformance scenarios**, with exactly these names:
+
+- `QA re-checks only what a fix touched`
+- `a standards-only fix keeps the QA report`
+- `a verification fix is re-checked by QA`
+- `a kept QA report is covered by the next re-check`
 
 ## 7. Conventions
-- **Python 3.9.** No `X | None` or `list[...]` in runtime annotations; types go in docstrings, as `.claude/bin` does. This overrides the Python rules' annotation rule for this repository.
-- **The ratchet:** functions of 60 lines or fewer (100 in tests), nesting of 4 or fewer, lines of 120 characters or fewer, files of 800 lines or fewer.
-- **No timing assertions.** Guardrails assert names and counts only.
-- **Tests that read `flow-budget.json`, the flow's guides or bench files** are `FLOW_REPO_ONLY`. The stdlib, debt-marker and hook-import tests run everywhere the suite ships.
-- **No personal paths in tests or docs.**
-- **The guides cite no flow version numbers** (`acceptance/test_docs.py`).
+
+- English everywhere; usage errors keep the `Uso:` prefix (design 0016).
+- The workflow's prompt literals equal the spec's text character by character; the conformance tests compare every prompt.
+- No new module, no new dependency. `flow-budget.json` is raised only by what the change needs, with its why.
+- The guides do not cite flow version numbers (`acceptance/test_docs.py`).
+- Commit format: `type: summary` in English; the flow history is regenerated as the last commit.
 
 ## 8. Work packages and acceptance criteria
+
 ### Acceptance criteria
-- AC-001 · The hook loads only the guard
-  - Scenario: a temporary git repo holding copies of this branch's `.claude/bin/`, `.claude/settings.json` and `.claude/agents/`, `CLAUDE_PROJECT_DIR` pointing at it, and the payload `{"tool_name": "Bash", "tool_input": {"command": "ls"}, "session_id": "s1"}` on stdin.
-  - Action: `python3 -X importtime .claude/bin/hook.py`.
-  - Expected:
-    - exit code 0;
-    - none of `HOOK_FORBIDDEN_MODULES` among the loaded modules;
-    - `guardrail` and `stage` among them;
-    - `.claude/state/hook-seen.json` written, with `session_id` `s1`.
-  - Must not: change the hook's result; leave a forbidden module loaded.
-  - Check: `test_acceptance_v218.py`, `HookPathTests`.
+
+- AC-001 · QA re-checks only what a fix touched
+  - Scenario: the conformance plan; QA's first report is FAIL with one high implementation defect on WP-02; its second is PASS.
+  - Action: the Python engine (`pipeline.Pipeline`) runs to the end with scripted agents. The acceptance tests of AC-001 to AC-004 declare their own scenarios inline, with `test_pipeline.py`'s helpers for a scripted gate and agents, and read the options each call received; they do not read `conformance.json`.
+  - Expected: two QA calls. The first prompt is the `qa` prompt. The second has label `qa (re-check)`, starts with `Re-check the system after a fix`, names `WP-02`, `.claude/state/runs/WP-02.fix-1.diff` and the first report's defect as JSON, ends with the rules, and is asked with `resume=True`. `run["qa_passes"]` modes are `["full", "scoped"]`. `run["qa"]` is the second report.
+  - Must not: the second prompt is the `qa` prompt; the diff of a package that was not fixed is named.
+  - Check: `test_acceptance_v219.py`
   - WP: WP-01
-- AC-002 · The fast hook keeps the guard's behaviour
-  - Scenario: as AC-001, with `architecture.md` holding `test_agentic.MANIFEST` (WP-01 owns `src/a.py` and `tests/test_a.py`).
-  - Action:
-    - through `hook.py`: a `Write` of `<copy>/outside.py` by a fallback agent (`AGENTIC_WP=WP-01`);
-    - directly as `python3 <copy>/.claude/bin/agentic.py hook`, bypassing `hook.py` (which would run the other repository's own script): the cwd outside both repositories and `CLAUDE_PROJECT_DIR` naming another git repository.
-  - Expected:
-    - the first exits 2 and stderr holds `WP-01 does not own outside.py`;
-    - the second exits with the same code, and the same stderr, as `python3 <copy>/.claude/bin/agentic.py validate` in that environment (the `root_drift` refusal).
-  - Must not: let the write through; ignore the root drift.
-  - Check: `test_acceptance_v218.py`, `HookPathTests`.
+
+- AC-002 · A Standards-only fix keeps QA's report
+  - Scenario: the standards reviewer reports one reflex finding on WP-02, then its re-review says ADDRESSED; QA's only report is PASS with one low defect.
+  - Action: the Python engine runs to the end.
+  - Expected: exactly one QA call. `run["qa"]` is that report, with its low defect. Modes are `["full", "kept"]`. The gate still receives `close-stage qa QA=pass` after the fix. The result is `OK`.
+  - Must not: a second QA call; a missing `close-stage qa`.
+  - Check: `test_acceptance_v219.py`
   - WP: WP-01
-- AC-003 · Only the standard library
-  - Scenario: this repository; and a temporary copy of `.claude/bin` with one extra module, `extra.py`, containing `import requests`.
-  - Action: `test_lean.third_party_imports(root)`.
-  - Expected:
-    - `[]` for this repository;
-    - `[(".claude/bin/extra.py", "requests")]` for the copy;
-    - local modules (`core`, `compat`) and `from . import x` are never reported.
-  - Must not: report a stdlib module such as `xml.etree.ElementTree` or `http.client`.
-  - Check: `test_acceptance_v218.py`, `LeanTests` (skips below Python 3.10).
+
+- AC-003 · Any other fix is re-checked, and a kept report is covered later
+  - Scenario A: QA's first report has one high implementation defect on WP-02; after its fix, verification fails once on a file of WP-01 (source `verification`), which is fixed too.
+  - Scenario B: the standards reviewer reports one reflex finding on WP-02. After the first fix its re-review says NOT_ADDRESSED (QA is kept), so WP-02 is fixed a second time. After that fix verification fails once on a file of WP-01, which is fixed; then the re-review says ADDRESSED.
+  - Action: the Python engine runs to the end.
+  - Expected: A: modes `["full", "scoped"]`, and the scoped prompt names `WP-01, WP-02` and the diffs `WP-01.fix-1` and `WP-02.fix-1`. B: modes `["full", "kept", "scoped"]`, and the scoped prompt names `WP-01, WP-02` and the three diffs `WP-01.fix-1`, `WP-02.fix-1` and `WP-02.fix-2`.
+  - Must not: `kept` when a defect of the cycle has a source other than `standards-reviewer`.
+  - Check: `test_acceptance_v219.py`
+  - WP: WP-01
+
+- AC-004 · The rules are printed only where they are used
+  - Scenario: a plan whose rules text is `RULE-TEXT`, with documentation; the reviewer and the standards reviewer each report one blocking finding on WP-02, so one fix cycle re-reviews both axes.
+  - Action: the Python engine runs to the end.
+  - Expected: `RULE-TEXT` is in every prompt of the implementer, the test-author, the standards reviewer (review and re-review) and QA; it is in no prompt of the test-auditor, the reviewer (review and re-review), the doc-updater, the verifier or the gatekeeper.
+  - Must not: `Rules you must follow` in any prompt of the second group.
+  - Check: `test_acceptance_v219.py`, on the Python engine's prompts; the workflow's are compared by AC-005
+  - WP: WP-01
+
+- AC-005 · Both engines stay equivalent
+  - Scenario: `conformance.json` with the four scenarios named in section 6.
+  - Action: `node .claude/bin/test_workflow.mjs`, and `test_pipeline.ConformanceTests`.
+  - Expected: both pass. The four names are in `conformance.json`. `"qa_passes"` is in the `keys` tuple of `test_pipeline.ConformanceTests` and in the text of `test_workflow.mjs`. The text of `agentic-implement.js` contains `qa (re-check)` and `Re-check the system after a fix`.
+  - Must not: a scenario skipped in one engine.
+  - Check: `test_acceptance_v219.py` (the names, the key and the literals) and the two commands, which `verify` runs
+  - WP: WP-01
+
+- AC-006 · The definitions say what the prompts now do
+  - Scenario: the agent definitions and `implement.md`.
+  - Action: read them.
+  - Expected: `qa.md` has a `# Re-check` section that names the diffs and "every defect that is still open". `reviewer.md` does not contain "rules printed in your prompt". `doc-updater.md` contains neither "check that all its relative links" nor "Create it if it is in your zone", and says to write the CHANGELOG only when it is in its zone. `implement.md` mentions `qa_passes`.
+  - Must not: `qa.md`, `implementer.md` or `test-author.md` lose "the rules printed in your prompt".
+  - Check: `test_acceptance_v219.py`
   - WP: WP-02
-- AC-004 · The size budget holds both ways
-  - Scenario: this repository with its `.claude/flow-budget.json` (written by WP-03, so this case stays red until then); and temporary roots whose budget is below the measures, or loose beyond the band.
-  - Action: the budget check, `test_lean.budget_problems(root)` returning a list of messages.
-  - Expected:
-    - `[]` here;
-    - a budget lower than a measure gives the "above its budget" message of section 5;
-    - a measure below `budget * (1 - BUDGET_SLACK)` gives the "lower it" message of section 5;
-    - an empty `why` gives `flow-budget.json needs a why`.
-  - Must not: pass a budget the code exceeds; pass a stale, loose budget.
-  - Check: `test_acceptance_v218.py`, `LeanTests`.
-  - WP: WP-02
-- AC-005 · Debt markers name an issue
-  - Scenario: this repository; and a temporary root whose `.claude/bin/a.py` has three lines: one marker with no issue, one with `#42`, one with `issue 42`.
-  - Action: `test_lean.unreferenced_markers(root)`.
-  - Expected:
-    - `[]` here;
-    - one entry for the temporary root, at line 1 of `.claude/bin/a.py`.
-  - Must not: report a marker that names an issue; miss a marker in a `.js` file under `.claude/workflows/`.
-  - Check: `test_acceptance_v218.py`, `LeanTests`.
-  - WP: WP-02
-- AC-006 · Docs and release 2.18.0
-  - Scenario: the repository.
-  - Action: read the files.
-  - Expected:
-    - `plugin.json` version `2.18.0`;
-    - `NOTES["2.18.0"]` has at least 2 entries, naming `hook` and `flow-budget.json`;
-    - `docs/how-it-works.md` names `flow-budget.json` and the standard-library rule;
-    - `docs/how-to/plugin.md` names `flow-budget.json` among the release steps;
-    - the only acceptance file is `test_acceptance_v218.py`;
-    - `test_field_fixes.py` defines `AnnexTests`, `ReferenceTests`, `KeptCopyTests`, `NetworkTests`, `SessionTests` and `DocsTests`.
-  - Must not: keep `test_acceptance_v217.py`.
-  - Check: `test_acceptance_v218.py`, `ReleaseTests`.
+
+- AC-007 · Docs and release 2.19.0
+  - Scenario: this repository.
+  - Action: read `plugin.json`, `upgrade.NOTES`, `docs/how-it-works.md`, the test files.
+  - Expected: version `2.19.0`; `NOTES["2.19.0"]` has at least two notes that name "QA" and "rules"; `how-it-works.md` says QA re-checks after a fix; the only `test_acceptance*.py` is `test_acceptance_v219.py`; `test_lean_hook.py` holds the classes `HookPathTests`, `LeanTests` and `ReleaseTests` moved from the 2.18.0 file.
+  - Must not: a version number of the flow in a guide.
+  - Check: `test_acceptance_v219.py`
   - WP: WP-03
 
 ### Work packages
-#### WP-01 · The hook loads only the guard
-- Wave 1.
-- Files: `.claude/bin/agentic.py`, `.claude/bin/test_hook_path.py`.
-- Contracts: the fast path and `hook_modules` (section 6).
-- ACs: AC-001, AC-002.
-- **Patterns to mirror:** `agentic.py:73-100`, `agentic.py:395-414` and `test_guardrail.py:44-67` (a `Repo`, its `run` and `hook`).
-- **Gotchas:**
-  - `test_definitions.py` checks that names `agentic.py` re-exports are the modules' own objects. The fast path must not shadow any of them: use underscore names (`_hook`, `_die`, `_root_drift`).
-  - Tests that `import agentic` must not trigger the fast path: `__name__` is then `"agentic"`.
-  - `-X importtime` writes to stderr; the hook also writes warnings there. Parse only lines starting with `import time:`.
-  - The copy for the test holds `bin/`, `settings.json` and `agents/`. `test_guardrail.py` runs `agentic.py hook` directly; AC-001 goes through the copy's `hook.py`.
-- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_hook_path.py"`, `python3 -m unittest discover -s .claude/bin -p "test_guardrail.py"`, `python3 -m unittest discover -s .claude/bin -p "test_definitions.py"`.
 
-#### WP-02 · The lean guardrails
+#### WP-01 · The spec, both engines and the scenarios
 - Wave 1.
-- Files: `.claude/bin/test_lean.py`.
-- Contracts: `code_lines`, `prompt_bytes`, `budget_problems`, `third_party_imports`, `unreferenced_markers` (sections 5 and 6), as module-level functions so the acceptance tests can call them on temporary roots.
-- ACs: AC-003, AC-004, AC-005.
-- **Patterns to mirror:** `test_definitions.py:8-28` (imports, `ROOT`, `FLOW_REPO_ONLY`) and `test_layout.py:1-48` (a small file of one-purpose checks).
+- Files: `.claude/workflows/pipeline-spec.json`, `.claude/bin/pipeline.py`, `.claude/bin/launch.py`, `.claude/bin/conformance.json`, `.claude/bin/test_pipeline.py`, `.claude/bin/test_launcher.py`, `.claude/bin/test_fix_cycles.py`, `.claude/workflows/agentic-implement.js`, `.claude/bin/test_workflow.mjs`.
+- Implements section 6 whole. Consumes nothing. One package for both engines: `ConformanceTests` compares them, so neither is green without the other.
+- ACs: AC-001, AC-002, AC-003, AC-004, AC-005.
+- **Patterns to mirror:** `.claude/bin/pipeline.py:590-625` and `.claude/workflows/agentic-implement.js:609-629` (scope, diffs and label of a scoped pass, in each engine); `.claude/bin/pipeline.py:541-544` (the reset); `.claude/bin/pipeline.py:427-433` (`resume`); `.claude/workflows/agentic-implement.js:544-550` (`RULES`); `.claude/bin/test_pipeline.py:459-470` (how a test reads a scenario's prompts by agent); `.claude/bin/test_workflow.mjs:498-617` (the summary and the spec comparison).
 - **Gotchas:**
-  - Parse imports with `ast`, never with regexes: a docstring that says "import requests" is not an import.
-  - Relative imports (`level > 0`) are local.
-  - Only the first part of the dotted name is checked.
-  - `__future__` is stdlib.
-  - In the JS harness, `node:`-prefixed specifiers are built-ins once the prefix is dropped.
-  - `.claude/workflows/agentic-implement.js` may use no `require` at all. Then the JS part finds nothing, which is fine.
-  - WP-02 does not write `flow-budget.json`: WP-03 does, last. Until then the budget test on this repository fails with `flow-budget.json is missing`, an expected failure (section 11); the tests on temporary roots must pass.
-  - The acceptance file and `test_lean.py` itself live in `.claude/bin`, which the marker scan reads: build the marker words from parts, never write them literally.
-- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_lean.py"`, `python3 .claude/bin/agentic.py quality`.
+  - Quality: a function may have at most 60 lines. `Pipeline.judge` (73) and the workflow's `runAfterPlan` (capped at 128) are in the baseline and may not grow by a line: the QA decision goes in its own method, `qa_stage` in Python and `qaStage` in the workflow, and the loop calls it. The number of lines over 120 characters may not rise in `pipeline.py`, `agentic-implement.js` or `test_pipeline.py`: split the `qa_recheck` literal across lines in the workflow, as the re-review's is.
+  - `qa_passes` must be added in three places or it is never compared: both `summarize` functions and the `keys` tuple.
+  - The workflow has no disk and no resume: its re-check is an ordinary `report(...)` with label `qa (re-check)`. `test_workflow.mjs` compares the spec's prompts with the script's literals, so `qa_recheck` must be found there.
+  - Sort the packages before joining, in both engines, or the prompts differ.
+  - A resumed call uses the QA schema of the agent type: no `schema=` is passed.
+  - The scripted agents of `test_pipeline.py` must accept `**opts`, or the resumed QA call fails inside them (4b). The acceptance tests' own agents too.
+  - `test_fix_cycles.py:185` changes as 4b says; read `test_ac_005` (line 163) as well, whose run now resumes QA.
+- **Exact imports and APIs:** `render`, `compact`, `self.call`, `self.stop`, `self.prompts[...]`, all already in `pipeline.py`; `report`, `stop`, `RULES`, `QA_SCHEMA` in the workflow.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_pipeline.py"`; `python3 -m unittest discover -s .claude/bin -p "test_launcher.py"`; `python3 -m unittest discover -s .claude/bin -p "test_fix_cycles.py"`; `node .claude/bin/test_workflow.mjs`; `python3 .claude/bin/agentic.py quality`.
+
+#### WP-02 · The definitions
+- Wave 1.
+- Files: `.claude/agents/qa.md`, `.claude/agents/doc-updater.md`, `.claude/agents/reviewer.md`, `.claude/commands/implement.md`, `.claude/bin/test_definitions.py`.
+- Consumes section 6 by signature.
+- ACs: AC-006.
+- **Patterns to mirror:** `.claude/agents/reviewer.md:98-103` (how a "# Re-review" section is written); `.claude/bin/test_definitions.py:612-626` (how a definition test reads phrases).
+- **Gotchas:** `prompt_bytes` is budgeted (99,000; 98,956 today) and counts the agents and the commands, `implement.md` included: the new text should be paid for by the lines removed; if the sum still grows, WP-03 raises the budget. `test_definitions.py` pins phrases of these files: run it.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_definitions.py"`.
 
 #### WP-03 · Docs, notes, release and the moved tests
-- Wave 2: the docs and notes describe WP-01 and WP-02.
-- Depends on: WP-01, WP-02.
-- Files: `docs/how-it-works.md`, `docs/how-to/plugin.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/bin/test_field_fixes.py`, `.claude/bin/test_acceptance_v217.py`, `.claude/flow-budget.json`, `.claude/flow-history.json`.
-- ACs: AC-006.
-- **Patterns to mirror:** `docs/how-it-works.md:253`, `docs/how-to/plugin.md:110-120`, `upgrade.py:156-170` and `test_hook_diagnosis.py:1-10`.
+- Wave 2 (it moves the previous acceptance file and regenerates the history, after everything else).
+- Files: `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_lean_hook.py`, `.claude/bin/test_acceptance_v218.py`.
+- ACs: AC-007.
+- **Patterns to mirror:** `.claude/bin/upgrade.py:156-170` (a release's notes); `.claude/bin/test_field_fixes.py:1-10` (the header of a file of moved tests); `docs/how-it-works.md:140-156` (where fix cycles are described).
 - **Gotchas:**
-  - Write `flow-budget.json` after the notes in `upgrade.py`, which `code_lines` counts: measure with `test_lean.code_lines(ROOT)` and `prompt_bytes(ROOT)`, round up to the next 10 and 100, and set `why`.
-  - `flow-history.json` is regenerated last, after every other commit (`agentic.py flow-history`, then `--check`).
-  - The moved file imports `InstallCase` and `commit` from `test_install`, as the acceptance file did.
-- **Validation:** `python3 -m unittest discover -s .claude/bin -p "test_field_fixes.py"`, `python3 .claude/bin/agentic.py docs-check`, `python3 -m unittest discover -s acceptance`, `python3 -m unittest discover -s qa`.
+  - The moved classes need the helpers of `test_acceptance_v218.py` (`temp_dir`, `module`, `load`, `write`, `FORBIDDEN`, `PAYLOAD`, `MARK`): move them too.
+  - In the moved `ReleaseTests`, drop the two assertions that only a current release can hold (the plugin's version, and "the only acceptance file"). Keep the rest, `NOTES["2.18.0"]` and the docs included, and mark the class `FLOW_REPO_ONLY`, because it reads this repository's docs.
+  - `flow-budget.json`: `code_lines` (7,210) will grow with the engines and the notes, and `prompt_bytes` may: raise only what is exceeded, with its why.
+  - The README does not describe QA's passes: it needs no change.
+  - `docs/how-it-works.md:401` says the workflow hands the rules "to each agent": say which agents now.
+  - `.claude/flow-history.json` is not this package's: it is built from git, so the maintainer regenerates it by hand as the last commit.
+- **WP validation:** the four commands of section 3, and `python3 -m unittest discover -s acceptance` (it holds the docs test of section 7).
 
 ```json wp-manifest
 {
   "maintainer": true,
   "stack": ["python", "typescript"],
   "allow_bash": ["Bash(python3 -m unittest:*)", "Bash(node .claude/bin/test_workflow.mjs)"],
-  "acceptance": {"files": [".claude/bin/test_acceptance_v218.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_acceptance_v218.py"},
+  "acceptance": {"files": [".claude/bin/test_acceptance_v219.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_acceptance_v219.py"},
   "verify": {"build": "python3 -m unittest discover -s bench -p \"test_*.py\"", "lint": "node .claude/bin/test_workflow.mjs", "types": "python3 -m unittest discover -s bench/acceptance", "tests": "python3 -m unittest discover -s .claude/bin -p \"test_*.py\""},
   "docs": {"files": ["docs/assets/"], "codemap": null},
   "work_packages": [
-    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/agentic.py", ".claude/bin/test_hook_path.py"],
-     "acs": ["AC-001", "AC-002"], "mirror": [".claude/bin/agentic.py:73-100", ".claude/bin/agentic.py:395-414", ".claude/bin/test_guardrail.py:44-67"]},
-    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/test_lean.py"],
-     "acs": ["AC-003", "AC-004", "AC-005"], "mirror": [".claude/bin/test_definitions.py:8-28", ".claude/bin/test_layout.py:1-48"]},
-    {"id": "WP-03", "wave": 2, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", "docs/how-to/plugin.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/bin/test_field_fixes.py", ".claude/bin/test_acceptance_v217.py", ".claude/flow-budget.json", ".claude/flow-history.json"],
-     "acs": ["AC-006"], "mirror": ["docs/how-it-works.md:253", "docs/how-to/plugin.md:110-120", ".claude/bin/upgrade.py:156-170", ".claude/bin/test_hook_diagnosis.py:1-10"]}
+    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/workflows/pipeline-spec.json", ".claude/bin/pipeline.py", ".claude/bin/launch.py", ".claude/bin/conformance.json", ".claude/bin/test_pipeline.py", ".claude/bin/test_launcher.py", ".claude/bin/test_fix_cycles.py", ".claude/workflows/agentic-implement.js", ".claude/bin/test_workflow.mjs"],
+     "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-005"], "mirror": [".claude/bin/pipeline.py:590-625", ".claude/workflows/agentic-implement.js:609-629", ".claude/bin/pipeline.py:541-544", ".claude/bin/pipeline.py:427-433", ".claude/workflows/agentic-implement.js:544-550", ".claude/bin/test_pipeline.py:459-470", ".claude/bin/test_workflow.mjs:498-617"]},
+    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/agents/qa.md", ".claude/agents/doc-updater.md", ".claude/agents/reviewer.md", ".claude/commands/implement.md", ".claude/bin/test_definitions.py"],
+     "acs": ["AC-006"], "mirror": [".claude/agents/reviewer.md:98-103", ".claude/bin/test_definitions.py:612-626"]},
+    {"id": "WP-03", "wave": 2, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_lean_hook.py", ".claude/bin/test_acceptance_v218.py"],
+     "acs": ["AC-007"], "mirror": [".claude/bin/upgrade.py:156-170", ".claude/bin/test_field_fixes.py:1-10", "docs/how-it-works.md:140-156"]}
   ]
 }
 ```
 
 ## 9. Test strategy
-- **Unit:** each WP in its own test file, stdlib `unittest`. The guardrails are themselves tests; their helpers are module-level functions tested on temporary roots.
-- **Acceptance:** `.claude/bin/test_acceptance_v218.py`, written from AC-001 to AC-006 before the code. It must be red today:
-  - AC-001: the hook loads `launch` and `http.client`;
-  - AC-003 to AC-005: `test_lean` does not exist;
-  - AC-006: the release is missing.
 
-  AC-002 guards behaviour and may already be green.
-- **QA, by hand:**
-  - every CI suite, `quality` and `docs-check`;
-  - the installed-project run, as CI's `installed` job: there `test_lean`'s budget test skips and its other tests run;
-  - the hook timing measured again (20 calls, `hook.py`), reported as a number, never asserted;
-  - mutations, at least:
-    - the fast path removed;
-    - `root_drift` skipped in it;
-    - a forbidden module dropped from the list;
-    - the budget comparison flipped;
-    - the 5 % band ignored;
-    - an issue reference no longer recognised;
-    - a relative import reported.
+- **Acceptance** (`test_acceptance_v219.py`, written first and red): AC-001 to AC-004 drive `pipeline.Pipeline` with a scripted gate and scripted agents, the way `test_pipeline.py` runs a conformance scenario, and read the prompts and options each call received. AC-005 to AC-007 read files. Nothing is spent.
+- **Unit:** each package extends the tests of its files; the conformance scenarios are the shared check of both engines.
+- **Teeth:** before the release, each behaviour is broken once by hand (the `kept` test inverted, the Spec axis given the rules, a package left out of the diffs) and the acceptance test must fail.
+- **Measurement, by hand, after the code is green:** `python3 bench/bench.py ab --a agentic-flow--v2.18.1 --b <this branch> --fixture tally --repeat 5 --seed 0` (10 real sessions; about 9 USD at the costs of the last A/B, not measured for this one). The result files are committed. Reported: cost, minutes, output, oracle and mutation, the interval and the sign test, and `qa_passes` per session, read by hand from each session's result file in the A/B's folder (the bench saves the whole run record).
+- **By hand, before the pull request:** the suites CI runs beyond `verify` (`python3 -m unittest discover -s acceptance`, `python3 -m unittest discover -s qa`), the installed-project job, and `agentic.py flow-history` as the last commit, with its `--check`.
+- **What decides:** quality first. If the oracle or the mutation score of arm B is lower than arm A's beyond what the sessions of one arm differ among themselves, the QA change is not released as it is. A saving whose interval includes 1 is reported as not shown, not as a saving.
 
 ## 10. Decisions
+
 | Decision | Discarded | Why |
 |---|---|---|
-| The fast path lives in `agentic.py`, keyed on `__main__` and `argv` | Edit `hook.py`; a new `guard.py` entry point | `hook.py` is never owned and is what `settings.json` names in every project; a new entry point would change every project's settings. |
-| An import budget, not a time budget (user's choice of the four guardrails) | Assert the hook under N ms | Timings vary across CI machines; the forbidden modules are what made it slow. |
-| `stage`, `verification` and `reports` stay on the hook path | Lazy-import them in `stage` | The stop gate needs them; the gain left is not measured and the change would reach the gate's code. |
-| A separate `flow-budget.json`, with a two-sided 5 % band | Extend `quality-baseline.json`; a one-sided cap | The baseline is a project file written by install and only by people; a one-sided cap lets a release shrink the flow and keep the old room, so the diet would not stick. |
-| Debt markers need an issue on the same line | Forbid them outright | A marker with an issue is tracked debt; one without is forgotten debt. |
-| Guardrails, then the bench and prompt trimming in the next release (user's choice) | All at once | The bench spends real sessions and needs its own approval; trimming needs measurements per prompt. |
+| QA gets a scoped re-check after a fix, with its last report's defects in the prompt | Leave QA whole; pass only the diffs | The second pass was a full repeat in the 5 sessions of the last A/B that had a fix cycle. The defects go in the prompt because the workflow has no resume: without them a fresh QA could not say which of its defects are still open, and the final report would lose them |
+| A Standards-only fix keeps QA's report | Always re-check | Such a fix names a constant or renames something; verification (tests and acceptance) runs after every fix and the standards re-review reads the diff. Chosen by the user |
+| The test for "Standards-only" is the defects' `source` | Tier `reflex`, or the size of the diff | `source` is set by the engine, not by an agent, and is already on every defect |
+| A kept report does not reset the scope | Reset on every visit | A later re-check must cover the fixes QA never saw |
+| The rules leave the test-auditor, the doc-updater and the Spec reviewer | Keep 0020's "every agent that writes or judges code" | Their definitions say they do not judge by the rules (the test-auditor: "do not judge style"; the reviewer: a breach "belongs to the other axis"; the doc-updater writes prose). This narrows design 0020; chosen by the user |
+| QA keeps the whole rules | Only their security list | Cutting a section needs code; left out by the user |
+| `re_review` keeps `{rules}`, rendered empty for Spec | Two prompts | One prompt, one pinned test unchanged |
+| QA's session is resumed in the fallback only | Add resume to the workflow | The workflow script has no sessions; the fallback already resumes fix attempts |
+| `qa_passes` in the run record | Nothing, or keeping every QA report | The bench could not tell what the first QA had found; modes and counts are enough to measure this change without growing the record |
+| No gatekeeper merges | Merge 10 calls into 8 | Left out by the user: small, unmeasured, and it blurs which stage a lost call belonged to |
+| The budget's QA count is unchanged | One less call when a cycle is Standards-only | It is an upper bound; changing it moves pinned scenarios for no saving |
+| The flow history and the A/B are steps by hand, not a package's | Give them to WP-03 | The history is built from git commits, which no agent makes; the A/B spends real sessions |
+| The manifest's `docs` zone stays `docs/assets/`, as in the last maintainer designs | The guides in the doc-updater's zone | The guides are part of the design here (WP-03 owns the one that changes), so the doc-updater has nothing to add |
+| Both engines in one package | One package per engine, in the same wave | `ConformanceTests` runs the workflow and compares it with the Python engine: neither passes its own validation without the other |
+| The workflow script's size is recorded in the quality baseline (800 to 831 lines) | Squeeze 28 lines out of it by joining schema definitions | The script was exactly at the 800-line limit and cannot be split (it has no disk); squeezing would be cosmetic and the next change would hit the limit again. Decided by the user during the implementation |
+| Written with Fable 5.2 | Pause to switch model | The user chose it at the model gate |
 
 ## 11. Risks and open questions
-- **The timing gain is measured in one container only** (100 ms against 58 ms per call). Windows and other machines are not measured; the import budget holds everywhere.
-- **`sys.stdlib_module_names` is missing on Python 3.9.** The stdlib test skips there; the other CI jobs run it.
-- **The 5 % band makes every larger change touch `flow-budget.json`.** That is the point, but it adds one line to such PRs.
-- **A fix cycle after WP-03.** Any code change after WP-03 wrote `flow-budget.json` can push a measure past it: WP-03 then measures and writes the budget again, as the last change before the release.
-- **`verify` does not run `acceptance/`, `qa/`, `quality` or `docs-check`**, as in earlier designs; QA runs them by hand. Its phase labels do not match their suites, as before.
-- **Expected failures between wave 0 and WP-03.** Once `test_acceptance_v218.py` exists, `test_layout.py` and v217's `ReleaseTests` fail until WP-03 deletes `test_acceptance_v217.py`; the budget test on this repository fails until WP-03 writes `flow-budget.json`. `flow-history --check` fails until the last commit.
-- **Archive and index by hand.** On approval, the maintainer copies this file to `docs/architecture/0025-lean-guardrails.md` and adds its line to `docs/architecture/README.md`.
+
+- **A scoped QA can miss a regression far from the fix.** Verification runs the whole suite and the acceptance tests after every fix, and QA re-runs its own tests; what is lost is new exploratory tests outside the diff. The A/B's mutation score is the check. If it drops, the scoped pass is dropped and only the kept mode is released.
+- **The saving is an estimate until measured.** From the last A/B: the second QA passes cost about 10 % of the total, and the three agents' rules about 2.5 to 3 %. Neither is measured for this design; the A/B of section 9 measures the first on `tally`, and five sessions per arm can still leave an interval that includes 1.
+- **Rules arriving twice: not confirmed.** In the container where this was checked, a 40 KB file in `.claude/rules/` changed the input of `claude -p` by 0 tokens, with and without `--agent`; so did a `CLAUDE.md`. The bench disables `CLAUDE.md` loading on purpose. Whether an interactive session's subagents receive `.claude/rules/` as well as the printed copy is open; nothing in this design depends on it.
+- **A resumed QA session may be gone** (a new container, a pruned session): the fallback already runs a fresh agent when a resumed one gives no report, at the cost of one extra call.
+- **The size budget will move.** `prompt_bytes` is 44 bytes under its budget: the new `qa_recheck` prompt lives in `pipeline-spec.json`, which the budget does not count, but the `# Re-check` section of `qa.md` and the line in `implement.md` do. `code_lines` (7,210) grows with the two engines and the notes. WP-03 raises what is exceeded, with its why.
