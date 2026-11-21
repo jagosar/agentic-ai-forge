@@ -1,5 +1,5 @@
 {
-  "code_lines": 7210,
-  "prompt_bytes": 99000,
-  "why": "2.18.1: +70 lines for the review fixes and their upgrade notes (the hook's git rules in one pass, a forced end for a child that ignores the timeout, Windows paths in commands), after removing 45 dead or duplicated ones"
+  "code_lines": 7271,
+  "prompt_bytes": 99297,
+  "why": "2.19.0: +61 lines for QA's re-check in both engines and its notes, +297 bytes for the Re-check section of qa.md and the qa_passes line of implement.md"
 }
