@@ -623,7 +623,7 @@ def run_pipeline(manifest, args):
         if res["status"] == "STOPPED":
             raise pipeline.Halted()
         return res
-    agent = resuming(launch, set(wps(manifest)))
+    agent = resuming(launch, set(wps(manifest)) | {"QA"})  # QA's re-check continues its session too
 
     def wave_done(wave):
         completed.append(wave)

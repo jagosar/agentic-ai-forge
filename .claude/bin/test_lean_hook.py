@@ -1,7 +1,8 @@
-"""Acceptance tests of agentic-flow 2.18.0: AC-001 .. AC-006 of docs/architecture/0025 (the hook loads only the guard;
-the standard library only; the size budget both ways; debt markers that name an issue; docs and release).
+"""The lean guardrails and the fast hook: the hook loads only the guard; the standard library only; the size budget
+both ways; debt markers that name an issue; their docs and notes. Moved as they were from test_acceptance_v218.py
+(design 0025, agentic-flow 2.18.0) when 2.19.0 retired it (design 0026); the release checks stayed behind.
 
-Run: python3 -m unittest discover -s .claude/bin -p test_acceptance_v218.py
+Run: python3 -m unittest discover -s .claude/bin -p test_lean_hook.py
 The hook runs in temporary copies of this branch's .claude/; the guardrails run on this repository and on temporary
 roots. Nothing is spent. The debt-marker words are built from parts, so this file never holds one.
 """
@@ -18,6 +19,9 @@ from pathlib import Path
 BIN = Path(__file__).resolve().parent
 ROOT = BIN.parents[1]
 sys.path.insert(0, str(BIN))
+import core  # noqa: E402
+
+FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own repo")
 
 FORBIDDEN = ("launch", "installer", "manifest_check", "repo_scan", "brief", "findings",
              "http.client", "ssl", "urllib.request", "email.parser")
@@ -104,6 +108,7 @@ class LeanTests(unittest.TestCase):
                                             'from .vendored import thing\n')
         self.assertEqual(self.lean.third_party_imports(root), [(".claude/bin/extra.py", "requests")])
 
+    @FLOW_REPO_ONLY  # projects do not carry the flow's budget
     def test_ac_004_the_budget_holds_here(self):
         self.assertEqual(self.lean.budget_problems(ROOT), [])
 
@@ -147,13 +152,12 @@ class LeanTests(unittest.TestCase):
 
 # ---------- AC-006: docs and release ----------
 
+@FLOW_REPO_ONLY  # a project does not carry the flow's own guides
 class ReleaseTests(unittest.TestCase):
     def read(self, rel):
         return (ROOT / rel).read_text(encoding="utf-8")
 
-    def test_ac_006_release_2_18_0(self):
-        plugin = json.loads(self.read(".claude-plugin/plugin.json"))
-        self.assertEqual(plugin["version"], "2.18.1")
+    def test_ac_006_docs_and_notes_of_2_18_0(self):
         notes = load("upgrade_v218", BIN / "upgrade.py").NOTES["2.18.0"]
         self.assertGreaterEqual(len(notes), 2)
         for words in ("hook", "flow-budget.json"):
@@ -162,7 +166,6 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("flow-budget.json", works)
         self.assertIn("standard library", works)
         self.assertIn("flow-budget.json", self.read("docs/how-to/plugin.md"))
-        self.assertEqual(sorted(p.name for p in BIN.glob("test_acceptance*.py")), ["test_acceptance_v218.py"])
         moved = self.read(".claude/bin/test_field_fixes.py")
         for name in ("AnnexTests", "ReferenceTests", "KeptCopyTests", "NetworkTests", "SessionTests", "DocsTests"):
             self.assertIn(f"\nclass {name}(", moved)

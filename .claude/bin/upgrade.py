@@ -153,6 +153,14 @@ NOTES = {
         "A workflow-subagent (the type the Workflow tool's subagents may carry; not verified) cannot write files "
         "before it claims its zone. Bash stays open, so a gatekeeper with that type keeps working.",
     ],
+    "2.19.0": [
+        "After a fix cycle QA no longer repeats its whole pass: it re-checks the packages fixed, against their diffs "
+        "and the defects of its last report (in the fallback engine it continues its session). When the fix only "
+        "closed findings of the standards reviewer, QA is not launched again and its report stands. The result's "
+        "qa_passes says how each pass ran: full, scoped or kept.",
+        "The printed rules reach only the agents that use them: the test-auditor, the doc-updater and the Spec "
+        "reviewer no longer receive them. The doc-updater leaves the link check to docs-check.",
+    ],
     "2.18.1": [
         "The hook's git rules: a backslash line continuation no longer hides --no-verify or commit -n, "
         "--config-env=core.hooksPath is refused, `git log --grep commit -n 5` and `git commit -uno` are no longer "
