@@ -250,7 +250,7 @@ class DefinitionTests(unittest.TestCase):
 class ReleaseTests(unittest.TestCase):
     def test_ac_007_release_2_20_0(self):
         plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.20.0")
+        self.assertEqual(plugin["version"], "2.20.1")
         notes = module("upgrade").NOTES["2.20.0"]
         self.assertGreaterEqual(len(notes), 2)
         for words in ("usage", "rules"):
