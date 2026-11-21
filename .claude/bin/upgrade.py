@@ -153,6 +153,15 @@ NOTES = {
         "A workflow-subagent (the type the Workflow tool's subagents may carry; not verified) cannot write files "
         "before it claims its zone. Bash stays open, so a gatekeeper with that type keeps working.",
     ],
+    "2.20.0": [
+        "The native workflow records its token usage: /implement runs `save-result --run <runId>`, which reads "
+        "Claude Code's own record of the run and its agents' transcripts and adds tokens, turns and model per agent "
+        "to the saved result (usage.by_agent; no dollars). If those files are not there, the result is saved without "
+        "it and the command says why.",
+        "Inside a Claude Code session the plan no longer prints the common rules: Claude Code already gives "
+        ".claude/rules/agentic/common.md to every agent as project instructions, and the prompt names it in one "
+        "line. The language rules are still printed, and the fallback mode prints them all.",
+    ],
     "2.19.0": [
         "After a fix cycle QA no longer repeats its whole pass: it re-checks the packages fixed, against their diffs "
         "and the defects of its last report (in the fallback engine it continues its session). When the fix only "

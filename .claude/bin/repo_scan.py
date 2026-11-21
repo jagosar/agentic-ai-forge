@@ -2,6 +2,7 @@
 symbols a change touched (for the reviewer) and the links and paths the documentation cites.
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -75,8 +76,33 @@ def render_rules(paths, root):
         parts.append(f"\n--- {rel} ---\n{text.strip()}\n")
     return "".join(parts)
 
-def rules_text(manifest):
-    return render_rules(rule_files(manifest), ROOT)
+POINTED_COMMON = ("\nThe common rules are already in your context, as project instructions ({paths}): follow them. "
+                  "Read those files only if you cannot see them there.\n")
+
+def always_loaded(path):
+    """Whether Claude Code loads this rules file for every agent: it has no frontmatter, or its frontmatter has no
+    `paths:` key. False when the file cannot be read."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return False
+    end = text.find("\n---", 3) if text.startswith("---") else -1
+    return end == -1 or not re.search(r"^paths\s*:", text[:end], re.M)
+
+def injected_by_claude_code():
+    """Whether this process runs inside a Claude Code session that loads project instructions: CLAUDECODE is set
+    and CLAUDE_CODE_DISABLE_CLAUDE_MDS is not."""
+    return bool(os.environ.get("CLAUDECODE")) and not os.environ.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS")
+
+def rules_text(manifest, native=False):
+    """The rules printed in a prompt. native: the plan of a workflow inside Claude Code, whose agents already
+    receive the files without a `paths` filter as project instructions (design 0027); those are named in one line
+    instead of printed, and the rest is printed as usual."""
+    files = rule_files(manifest)
+    loaded = [f for f in files if always_loaded(ROOT / f)] if native else []
+    if not loaded:
+        return render_rules(files, ROOT)
+    return POINTED_COMMON.format(paths=", ".join(loaded)) + render_rules([f for f in files if f not in loaded], ROOT)
 
 def wanted_rules():
     """The rule names rules_sync installs: "common" plus each declared or detected language with a file in the
