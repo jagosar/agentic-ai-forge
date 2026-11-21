@@ -56,7 +56,7 @@ Then present it like this:
   - Spec (contracts, correctness, security): confirmed findings, findings refuted by the verifier (and why), and finish notices;
   - Standards (section 7 and the rules): confirmed reflex findings with the rule each breaks, refuted ones, finish notices, and the waived ones with the waiver's reason;
   - whether the rules reached the agents printed or only as paths (`rules`: `printed`, `pointed` or `none`).
-- **QA:** status, plan, defects and coverage gaps.
+- **QA:** status, plan, defects and coverage gaps. `qa_passes` says how each pass ran: `full`, `scoped` (a re-check of what was fixed) or `kept` (a Standards-only fix: the earlier report stands).
 - **Fixes:** `fix_cycles` and which WPs were fixed. A failed verification also goes to a fix cycle when `verification.suspects` names the package that owns the failure.
 - **Documentation (`docs`, if there was any):** files the doc-updater updated, whether the code map changed, and the result of `docs-check`.
 - **Pending (`pending`):** each item with its type.
