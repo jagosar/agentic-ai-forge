@@ -1,0 +1,655 @@
+{
+  "result": "OK",
+  "stages": [
+    {
+      "stage": "wave 0",
+      "ok": true,
+      "test_author": {
+        "status": "DONE",
+        "coverage": [
+          {
+            "ac": "AC-001",
+            "tests": [
+              "test_money.py::test_amounts_parse_into_cents"
+            ]
+          },
+          {
+            "ac": "AC-002",
+            "tests": [
+              "test_money.py::test_malformed_amounts_are_rejected"
+            ]
+          },
+          {
+            "ac": "AC-003",
+            "tests": [
+              "test_money.py::test_cents_format_as_amounts"
+            ]
+          },
+          {
+            "ac": "AC-004",
+            "tests": [
+              "test_money.py::test_split_gives_extra_cents_first"
+            ]
+          },
+          {
+            "ac": "AC-005",
+            "tests": [
+              "test_money.py::test_negative_split_mirrors_positive"
+            ]
+          },
+          {
+            "ac": "AC-006",
+            "tests": [
+              "test_money.py::test_split_needs_real_parts"
+            ]
+          },
+          {
+            "ac": "AC-007",
+            "tests": [
+              "test_dates.py::test_dates_are_strict_iso"
+            ]
+          },
+          {
+            "ac": "AC-008",
+            "tests": [
+              "test_dates.py::test_month_end"
+            ]
+          },
+          {
+            "ac": "AC-009",
+            "tests": [
+              "test_dates.py::test_months_between"
+            ]
+          },
+          {
+            "ac": "AC-010",
+            "tests": [
+              "test_ledger.py::test_expense_is_recorded_cleanly"
+            ]
+          },
+          {
+            "ac": "AC-011",
+            "tests": [
+              "test_ledger.py::test_invalid_expenses_are_rejected"
+            ]
+          },
+          {
+            "ac": "AC-012",
+            "tests": [
+              "test_ledger.py::test_balances_include_everyone"
+            ]
+          },
+          {
+            "ac": "AC-013",
+            "tests": [
+              "test_ledger.py::test_extra_cents_go_to_first_sorted_names"
+            ]
+          },
+          {
+            "ac": "AC-014",
+            "tests": [
+              "test_ledger.py::test_balances_bounds_are_inclusive"
+            ]
+          },
+          {
+            "ac": "AC-015",
+            "tests": [
+              "test_settle.py::test_settlement_transfers"
+            ]
+          },
+          {
+            "ac": "AC-016",
+            "tests": [
+              "test_settle.py::test_settlement_ties_by_name"
+            ]
+          },
+          {
+            "ac": "AC-017",
+            "tests": [
+              "test_settle.py::test_unbalanced_input_is_rejected"
+            ]
+          }
+        ],
+        "blocker": null,
+        "not_checked": [
+          "Tests are red from ModuleNotFoundError (tally.money/dates/ledger/settle missing), as intended. Not run against an implementation, so the expected values are only hand-checked (AC-015 second case traced through the loop). I added a few small extra assertions beyond the ACs: balances() key order sorted, and Ann/Bob at 0 for an empty period. The unbalanced settle input is also checked as unchanged. No helpers or doubles were written."
+        ]
+      },
+      "check": "AT: 4 file(s) changed: acceptance/test_dates.py, acceptance/test_ledger.py, acceptance/test_money.py, acceptance/test_settle.py\nStage acceptance: all changes are within their owners.\nACCEPTANCE (red): RED, as it should be before the code\nRESULT: OK"
+    },
+    {
+      "stage": "wave 1",
+      "ok": true,
+      "check": "WP-01: 2 file(s) changed: tally/money.py, tests/test_money.py\nWP-02: 2 file(s) changed: tally/dates.py, tests/test_dates.py\nStage 1: all changes are within their owners.\nGATE: WP-01=0 WP-02=0\nRESULT: OK"
+    },
+    {
+      "stage": "wave 2",
+      "ok": true,
+      "check": "WP-03: 2 file(s) changed: tally/ledger.py, tests/test_ledger.py\nStage 2: all changes are within their owners.\nGATE: WP-03=0\nRESULT: OK"
+    },
+    {
+      "stage": "wave 3",
+      "ok": true,
+      "check": "WP-04: 2 file(s) changed: tally/settle.py, tests/test_settle.py\nStage 3: all changes are within their owners.\nGATE: WP-04=0\nRESULT: OK"
+    },
+    {
+      "stage": "wave 2 (fix)",
+      "ok": true,
+      "check": "WP-03: 2 file(s) changed: tally/ledger.py, tests/test_ledger.py\nStage 2: all changes are within their owners.\nGATE: WP-03=0\nRESULT: OK"
+    },
+    {
+      "stage": "documentation",
+      "ok": true,
+      "check": "DOCS: 1 file(s) changed: README.md\nStage docs: all changes are within their owners.\nRESULT: OK"
+    }
+  ],
+  "baseline": {
+    "phases": [
+      {
+        "name": "build",
+        "skipped": true
+      },
+      {
+        "name": "types",
+        "skipped": true
+      },
+      {
+        "name": "lint",
+        "skipped": true
+      },
+      {
+        "name": "tests",
+        "command": "python3 -m unittest discover -s tests",
+        "exit": 0,
+        "passed": true,
+        "tail": [
+          "..",
+          "----------------------------------------------------------------------",
+          "Ran 2 tests in 0.000s",
+          "",
+          "OK"
+        ]
+      },
+      {
+        "name": "quality",
+        "command": "agentic.py quality",
+        "exit": 0,
+        "passed": true,
+        "tail": []
+      }
+    ],
+    "preexisting_failures": []
+  },
+  "work_packages": {
+    "WP-01": {
+      "status": "DONE",
+      "wp": "WP-01",
+      "files": [
+        "tally/money.py",
+        "tests/test_money.py"
+      ],
+      "checks": [
+        {
+          "command": "python3 -m unittest discover -s tests",
+          "passed": true,
+          "detail": "21 tests OK"
+        },
+        {
+          "command": "python3 -m unittest discover -s acceptance -p test_money.py",
+          "passed": true,
+          "detail": "6 tests OK"
+        }
+      ],
+      "internal_decisions": [
+        "Regex uses [0-9] so non-ASCII digits are rejected",
+        "Whitespace stripped with str.strip()"
+      ],
+      "blocker": null,
+      "not_checked": [],
+      "concerns": [],
+      "missing_context": null
+    },
+    "WP-02": {
+      "status": "DONE",
+      "wp": "WP-02",
+      "files": [
+        "tally/dates.py",
+        "tests/test_dates.py"
+      ],
+      "checks": [
+        {
+          "command": "python3 -m unittest discover -s tests",
+          "passed": true,
+          "detail": "13 tests OK"
+        },
+        {
+          "command": "python3 -m unittest discover -s acceptance",
+          "passed": true,
+          "detail": "acceptance/test_dates.py passes. The 2 errors are import failures for tally.ledger and tally.settle (WP-03 and WP-04, not written yet)."
+        }
+      ],
+      "internal_decisions": [
+        "parse_date checks the text with a [0-9] regex and fullmatch, so Unicode digits, whitespace and a trailing newline are rejected.",
+        "Private helper _first_of_next_month is shared by month_end and months_between."
+      ],
+      "blocker": null,
+      "not_checked": [
+        "ruff and mypy were not run."
+      ],
+      "concerns": [],
+      "missing_context": null
+    },
+    "WP-03": {
+      "status": "DONE",
+      "wp": "WP-03",
+      "files": [
+        "tally/ledger.py",
+        "tests/test_ledger.py"
+      ],
+      "checks": [
+        {
+          "command": "python3 -m unittest discover -s tests",
+          "passed": true,
+          "detail": "34 OK"
+        },
+        {
+          "command": "python3 -m unittest acceptance.test_ledger",
+          "passed": true,
+          "detail": "5 OK"
+        }
+      ],
+      "internal_decisions": [
+        "Empty participants list now raises ValueError before storing; added to the invalid-adds test"
+      ],
+      "blocker": null,
+      "not_checked": [],
+      "concerns": [],
+      "missing_context": null
+    },
+    "WP-04": {
+      "status": "DONE",
+      "wp": "WP-04",
+      "files": [
+        "tally/settle.py",
+        "tests/test_settle.py"
+      ],
+      "checks": [
+        {
+          "command": "python3 -m unittest discover -s tests",
+          "passed": true,
+          "detail": "34 tests OK"
+        },
+        {
+          "command": "python3 -m unittest discover -s acceptance",
+          "passed": true,
+          "detail": "17 tests OK"
+        }
+      ],
+      "internal_decisions": [
+        "Used min() with (balance, name) keys for debtor and (-balance, name) for creditor, which gives the name-ascending tie-break.",
+        "Added a test for an empty dict, which settles to []."
+      ],
+      "blocker": null,
+      "not_checked": [],
+      "concerns": [],
+      "missing_context": null
+    }
+  },
+  "verification": {
+    "ok": true,
+    "blocking": [],
+    "preexisting_failures": [],
+    "suspects": {},
+    "phases": [
+      {
+        "name": "build",
+        "skipped": true
+      },
+      {
+        "name": "types",
+        "skipped": true
+      },
+      {
+        "name": "lint",
+        "skipped": true
+      },
+      {
+        "name": "tests",
+        "command": "python3 -m unittest discover -s tests",
+        "exit": 0,
+        "passed": true,
+        "tail": [
+          "..................................",
+          "----------------------------------------------------------------------",
+          "Ran 34 tests in 0.001s",
+          "",
+          "OK"
+        ],
+        "baseline_passed": true,
+        "status": "ok"
+      },
+      {
+        "name": "quality",
+        "command": "agentic.py quality",
+        "exit": 0,
+        "passed": true,
+        "tail": [],
+        "baseline_passed": true,
+        "status": "ok"
+      },
+      {
+        "name": "acceptance",
+        "command": "python3 -m unittest discover -s acceptance",
+        "passed": true,
+        "verdict": "GREEN",
+        "status": "ok"
+      }
+    ]
+  },
+  "review": {
+    "scoped": true,
+    "spec": {
+      "confirmed": [],
+      "refuted": [],
+      "advisory": [],
+      "addressed": [
+        {
+          "tier": "floor",
+          "severity": "high",
+          "provenance": "read",
+          "wp": "WP-03",
+          "file": "tally/ledger.py",
+          "line": 40,
+          "problem": "`add` accepts an empty participants list. The expense is stored, and every later `balances()` call raises ValueError from `split(cents, 0)`. One bad `add` makes the whole ledger unusable, which breaks the rule that a failed `add` changes nothing and that validation happens before any state change.",
+          "evidence": "ledger.py:36-43: `names = []` passes `all(names)` (True for an empty list) and the empty set passes the duplicate check. The expense is appended at line 44. In `balances`, `split(expense.cents, len(expense.participants))` is called with 0 (line ~58) and money.py:23 raises ValueError. `Ledger().add('2026-01-01','Ann','1.00',[])` succeeds, then `balances()` raises.",
+          "fix": "In `add`, before building the Expense, raise ValueError if `not names` (for example `if not payer or not names or not all(names)`).",
+          "if_skipped": "A caller who passes an empty participant list silently corrupts the ledger. `balances()` and `settle` then fail for every period that includes that expense, and the only way out is to discard the Ledger.",
+          "axis": "spec",
+          "fingerprint": "F958f1137"
+        }
+      ]
+    },
+    "standards": {
+      "confirmed": [],
+      "refuted": [],
+      "advisory": [],
+      "addressed": [],
+      "waived": []
+    },
+    "confirmed": [],
+    "refuted": [],
+    "advisory": [],
+    "waived": [],
+    "new": [],
+    "opened": true,
+    "callers": 0
+  },
+  "qa": {
+    "status": "PASS",
+    "plan": [
+      "Baseline: `python3 -m unittest discover -s tests` passed (34 tests) and `python3 -m unittest discover -s acceptance` passed (17 tests).",
+      "Contracts: ledger to money/dates and settle to ledger balances, tested from the consumer's side in `qa/test_qa.py`.",
+      "Integration: 200 random expenses go through Ledger.balances and then settle. Balances sum to 0, there are at most n-1 transfers, and every balance ends at 0. Period balances also sum to 0 for each month from months_between.",
+      "Edge cases: parse_amount rejects `1.`, `.5`, `+1`, `1e2`, Arabic-Indic digits and `-`. parse_date rejects trailing newline, leading space, year 0000 and full-width digits. split sums and mirrors for many cent and part values. A failed Ledger.add leaves balances unchanged. settle leaves its input unchanged.",
+      "Acceptance: AC-001 to AC-017 are already covered in `acceptance/`, so I did not duplicate them.",
+      "Regression and non-functional: discarded. There was no code before this architecture, and the architecture names no security or performance requirements.",
+      "All 9 QA tests pass. None were left red on purpose. The test named `test_d1_*` checks that an empty participant list is rejected. It passes and is not a defect."
+    ],
+    "defects": [],
+    "gaps": [
+      "Dates near `datetime.date.max` (for example month_end(9999-12-31)) raise OverflowError instead of ValueError. Section 6 doesn't specify this, so I didn't report it as a defect.",
+      "Section 6 doesn't say what an empty `participants` list should do. The code raises ValueError, which is reasonable.",
+      "Python 3.9 compatibility was not run, because only the local interpreter was available.",
+      "Rerun command from the repo root: `python3 -m unittest discover -s qa -p 'test_qa.py'`."
+    ],
+    "needs_validation": []
+  },
+  "test_audit": {
+    "rounds": 1,
+    "weak": [],
+    "advisory": []
+  },
+  "docs": {
+    "codemap": null,
+    "report": {
+      "status": "DONE",
+      "files": [
+        "README.md"
+      ],
+      "changes": [
+        "Added requirements, a usage example, a module and function overview (money, dates, ledger, settle) and the test commands to README.md. All of it is taken from architecture.md section 6 and from the function names in the code."
+      ],
+      "unverified": [
+        "The usage example's output was not run, because the command needed approval. The balances come from AC-012 and the settle result is derived by hand from the loop in the contract.",
+        "CHANGELOG.md does not exist and is not in docs.files, so no changelog entry was written.",
+        "I did not read the implementation bodies. Behaviour is documented from the architecture.md contracts, and only the function names and signatures were checked against the code."
+      ],
+      "blocker": null
+    },
+    "ownership_ok": true,
+    "check": {
+      "ok": true,
+      "checked": 1,
+      "broken": []
+    }
+  },
+  "fix_cycles": 1,
+  "pending": [
+    {
+      "type": "documentation",
+      "severity": "low",
+      "problem": "claims the doc-updater could not verify",
+      "unverified": [
+        "The usage example's output was not run, because the command needed approval. The balances come from AC-012 and the settle result is derived by hand from the loop in the contract.",
+        "CHANGELOG.md does not exist and is not in docs.files, so no changelog entry was written.",
+        "I did not read the implementation bodies. Behaviour is documented from the architecture.md contracts, and only the function names and signatures were checked against the code."
+      ]
+    }
+  ],
+  "not_checked": [
+    {
+      "agent": "test-author",
+      "label": "test-author",
+      "items": [
+        "Tests are red from ModuleNotFoundError (tally.money/dates/ledger/settle missing), as intended. Not run against an implementation, so the expected values are only hand-checked (AC-015 second case traced through the loop). I added a few small extra assertions beyond the ACs: balances() key order sorted, and Ann/Bob at 0 for an empty period. The unbalanced settle input is also checked as unchanged. No helpers or doubles were written."
+      ]
+    },
+    {
+      "agent": "test-auditor",
+      "label": "test-auditor",
+      "items": [
+        "I did not run the tests, because the implementation is absent and they are expected to be red.",
+        "I did not check mutation-style variants, such as a parser that accepts the compact `20260105` form that Python 3.11+ `date.fromisoformat` allows. The criteria do not list that input.",
+        "I did not check that the tests/ directory covers the same behaviour. It is outside the acceptance zone."
+      ]
+    },
+    {
+      "agent": "implementer",
+      "label": "WP-02",
+      "items": [
+        "ruff and mypy were not run."
+      ]
+    },
+    {
+      "agent": "standards-reviewer",
+      "label": "standards-reviewer",
+      "items": [
+        "I did not open the tests or the acceptance files.",
+        "I did not run the linter, mypy or the tests.",
+        "The literal 100 in money.py is cents per unit. It is also the only place that holds it, so I did not report it."
+      ]
+    },
+    {
+      "agent": "reviewer",
+      "label": "reviewer",
+      "items": [
+        "Test files and acceptance tests were not read or run.",
+        "Non-string argument types (None for payer or participants) were not examined.",
+        "month_end on year 9999 would raise OverflowError rather than ValueError; I treated that as out of scope."
+      ]
+    },
+    {
+      "agent": "reviewer",
+      "label": "reviewer (re-review)",
+      "items": [
+        "Did not run the test suite."
+      ]
+    }
+  ],
+  "gate_denials": {},
+  "verification_failures": [],
+  "agent_calls": 14,
+  "environment_retries": [],
+  "rules": "printed",
+  "usage": {
+    "total": {
+      "input": 134046,
+      "cache_read": 879578,
+      "output": 35408,
+      "turns": 110,
+      "cost_usd": 0.9779698
+    },
+    "by_agent": [
+      {
+        "id": "AT",
+        "agent": "test-author",
+        "label": "test-author",
+        "input": 14029,
+        "cache_read": 66811,
+        "output": 7924,
+        "cost_usd": 0.1420171,
+        "turns": 10
+      },
+      {
+        "id": "REVIEW",
+        "agent": "test-auditor",
+        "label": "test-auditor",
+        "input": 14172,
+        "cache_read": 27257,
+        "output": 1011,
+        "cost_usd": 0.0695117,
+        "turns": 8
+      },
+      {
+        "id": "WP-01",
+        "agent": "implementer",
+        "label": "WP-01",
+        "input": 8384,
+        "cache_read": 87485,
+        "output": 3413,
+        "cost_usd": 0.0763905,
+        "turns": 9
+      },
+      {
+        "id": "WP-02",
+        "agent": "implementer",
+        "label": "WP-02",
+        "input": 7251,
+        "cache_read": 68473,
+        "output": 2637,
+        "cost_usd": 0.0622013,
+        "turns": 10
+      },
+      {
+        "id": "WP-03",
+        "agent": "implementer",
+        "label": "WP-03",
+        "input": 9491,
+        "cache_read": 69841,
+        "output": 4359,
+        "cost_usd": 0.0885181,
+        "turns": 9
+      },
+      {
+        "id": "WP-04",
+        "agent": "implementer",
+        "label": "WP-04",
+        "input": 6969,
+        "cache_read": 66166,
+        "output": 2823,
+        "cost_usd": 0.0627026,
+        "turns": 8
+      },
+      {
+        "id": "REVIEW",
+        "agent": "standards-reviewer",
+        "label": "standards-reviewer",
+        "input": 4516,
+        "cache_read": 27539,
+        "output": 649,
+        "cost_usd": 0.0272959,
+        "turns": 6
+      },
+      {
+        "id": "REVIEW",
+        "agent": "reviewer",
+        "label": "reviewer",
+        "input": 11047,
+        "cache_read": 39380,
+        "output": 1190,
+        "cost_usd": 0.060014,
+        "turns": 5
+      },
+      {
+        "id": "REVIEW",
+        "agent": "verifier",
+        "label": "verify tally/ledger.py",
+        "input": 3373,
+        "cache_read": 8488,
+        "output": 534,
+        "cost_usd": 0.0196728,
+        "turns": 4
+      },
+      {
+        "id": "QA",
+        "agent": "qa",
+        "label": "qa",
+        "input": 16985,
+        "cache_read": 145576,
+        "output": 5541,
+        "cost_usd": 0.1378756,
+        "turns": 11
+      },
+      {
+        "id": "WP-03",
+        "agent": "implementer",
+        "label": "WP-03 (fix)",
+        "input": 3957,
+        "cache_read": 66037,
+        "output": 896,
+        "cost_usd": 0.0313757,
+        "turns": 6
+      },
+      {
+        "id": "REVIEW",
+        "agent": "reviewer",
+        "label": "reviewer (re-review)",
+        "input": 5140,
+        "cache_read": 17792,
+        "output": 357,
+        "cost_usd": 0.0259012,
+        "turns": 3
+      },
+      {
+        "id": "QA",
+        "agent": "qa",
+        "label": "qa",
+        "input": 14426,
+        "cache_read": 96712,
+        "output": 1965,
+        "cost_usd": 0.0870012,
+        "turns": 12
+      },
+      {
+        "id": "DOCS",
+        "agent": "doc-updater",
+        "label": "doc-updater",
+        "input": 14306,
+        "cache_read": 92021,
+        "output": 2109,
+        "cost_usd": 0.0874921,
+        "turns": 9
+      }
+    ]
+  }
+}
