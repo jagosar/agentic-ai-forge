@@ -1,8 +1,9 @@
-"""Acceptance tests of agentic-flow 2.19.0: AC-001 .. AC-007 of docs/architecture/0026 (QA re-checks only what a fix
-touched; a Standards-only fix keeps QA's report; the rules are printed only where they are used; both engines stay
-equivalent; the definitions, the docs and the release).
+"""QA after a fix and the rules per agent: QA re-checks only what a fix touched; a Standards-only fix keeps QA's
+report; the rules are printed only where they are used; both engines stay equivalent; the definitions. Moved as they
+were from test_acceptance_v219.py (design 0026, agentic-flow 2.19.0) when 2.20.0 retired it (design 0027); the release
+checks stayed behind.
 
-Run: python3 -m unittest discover -s .claude/bin -p test_acceptance_v219.py
+Run: python3 -m unittest discover -s .claude/bin -p test_qa_recheck.py
 The engine runs on scripted gates and agents (test_pipeline.world), with scenarios declared here. Nothing is spent.
 """
 import json
@@ -14,11 +15,9 @@ BIN = Path(__file__).resolve().parent
 ROOT = BIN.parents[1]
 CLAUDE = ROOT / ".claude"
 sys.path.insert(0, str(BIN))
-import core  # noqa: E402
 import pipeline  # noqa: E402
 import test_pipeline  # noqa: E402
 
-FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own repo")
 RULES_PLAN = {"rules": [".claude/rules/agentic/common.md"], "rules_sum": 4823,
               "rules_text": "\nRules you must follow (common and language). RULE-TEXT"}
 QA_DEFECT = {"id": "D1", "severity": "high", "wp": "WP-02", "kind": "implementation", "section": "6",
@@ -168,25 +167,6 @@ class DefinitionTests(unittest.TestCase):
         self.assertIn("qa_passes", self.read("commands/implement.md"))
         for name in ("qa.md", "implementer.md", "test-author.md"):
             self.assertIn("the rules printed in your prompt", self.read("agents/" + name), name)
-
-
-@FLOW_REPO_ONLY  # it reads this repository's docs and release files
-class ReleaseTests(unittest.TestCase):
-    def test_ac_007_release_2_19_0(self):
-        plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.19.0")
-        import upgrade
-        notes = upgrade.NOTES["2.19.0"]
-        self.assertGreaterEqual(len(notes), 2)
-        for words in ("QA", "rules"):
-            self.assertTrue(any(words in n for n in notes), words)
-        works = (ROOT / "docs/how-it-works.md").read_text(encoding="utf-8")
-        self.assertIn("re-checks", works)
-        self.assertNotIn("hands the list to each agent", works)
-        self.assertEqual(sorted(p.name for p in BIN.glob("test_acceptance*.py")), ["test_acceptance_v219.py"])
-        moved = (BIN / "test_lean_hook.py").read_text(encoding="utf-8")
-        for name in ("HookPathTests", "LeanTests", "ReleaseTests"):
-            self.assertIn(f"\nclass {name}(", moved)
 
 
 if __name__ == "__main__":

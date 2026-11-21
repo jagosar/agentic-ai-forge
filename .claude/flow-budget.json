@@ -1,5 +1,5 @@
 {
-  "code_lines": 7271,
-  "prompt_bytes": 99297,
-  "why": "2.19.0: +61 lines for QA's re-check in both engines and its notes, +297 bytes for the Re-check section of qa.md and the qa_passes line of implement.md"
+  "code_lines": 7455,
+  "prompt_bytes": 99745,
+  "why": "2.20.0: +184 lines for the reader of a workflow run's usage (workflow_usage.py), save-result --run and the native rules text, with their notes, +448 bytes for the usage step and bullet of implement.md"
 }
