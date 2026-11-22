@@ -38,6 +38,7 @@ GATE_MAX_DENIALS = 2  # per WP and stage; afterwards the report is let through
 GATE_MAX_LINES = 40  # lines shown to the agent in a denial
 GATE_TIMEOUT_S = 840  # below the hook's 900 s, so the gate times out before the CLI kills the hook
 GATE_STATUSES = ("DONE", "DONE_WITH_CONCERNS")
+ZONE_GATE_STATUSES = {"AT": ("DONE",), "QA": ("PASS", "FAIL")}  # a finished report, per zone (design 0029)
 WP_ID_RE = re.compile(r"WP-\d+")
 CONFIG = ROOT / ".claude" / "agentic.json"
 BASE_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"]

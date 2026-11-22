@@ -153,6 +153,12 @@ NOTES = {
         "A workflow-subagent (the type the Workflow tool's subagents may carry; not verified) cannot write files "
         "before it claims its zone. Bash stays open, so a gatekeeper with that type keeps working.",
     ],
+    "2.21.0": [
+        "The stop gate also holds the test-author and QA to the quality limits: when either submits a finished "
+        "report while a file of its own zone is over a limit (line length, file or function size), the hook refuses "
+        "the report with the lines at fault and the agent fixes them in the same call. At most two denials, as for "
+        "a package; after them the report goes through and verification names the zone, as before.",
+    ],
     "2.20.2": [
         "`agentic.py status` no longer leaves an empty .claude/state/ledger.json behind, and install no longer "
         "refuses a project that has one (\"the run state cannot be read\"): an empty ledger means nothing has run.",
