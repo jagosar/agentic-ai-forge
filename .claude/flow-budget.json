@@ -1,5 +1,5 @@
 {
-  "code_lines": 7494,
+  "code_lines": 7502,
   "prompt_bytes": 99948,
-  "why": "2.20.1 (issue 134): +39 lines for the quality limits' sentence, zone_suspects and their notes, +203 bytes for the zone_suspects line of implement.md"
+  "why": "2.20.2: +8 lines for the empty-ledger fix (status leaves no file, install accepts an empty one) and its note"
 }
