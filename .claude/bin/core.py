@@ -376,6 +376,8 @@ def now_hm():
     return time.strftime("%H:%M")
 
 def ledger_read():
+    if not LEDGER_JSON.exists():
+        return {}  # reading must not create it: an empty ledger used to stop the next install
     return locked_json(LEDGER_JSON, lambda d: None)
 
 def ledger_update(jid, **fields):
@@ -458,6 +460,7 @@ def ledger_render():
     if records:
         lines += ["", "## Usage", ""] + [f"- {r['label']}: {usage_line(r)}" for r in records]
         lines.append("Total: " + usage_line(usage_summary(records)["total"]))
+    STATE.mkdir(parents=True, exist_ok=True)
     LEDGER_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 def stop(ids):
