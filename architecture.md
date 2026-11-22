@@ -1,25 +1,26 @@
-# Architecture: whoever writes code is told the quality limits, and a quality failure names the zone that owns it (agentic-flow 2.20.1, issue 134)
-Type: fix · Size: standard
+# Architecture: the stop gate also holds the test-author and QA to the quality limits of their own files (agentic-flow 2.21.0, issue 134)
+Type: feature · Size: standard
 
 ## 1. Goal
 
-The verification's quality phase checks every file of the project, the acceptance tests and QA's tests included, against limits that no agent is ever told: a line of at most 120 characters, a new file of at most 800 lines, a new function of at most 60. In a real project the test-author wrote acceptance files over those limits twice; the failures went to implementation packages that cannot edit that zone, both fix cycles were spent on them, and the run ended in REVIEW with review, QA and documentation never started. When the limit was written into the plan by hand, the same project's next run ended OK with no fix cycle. This release prints the active limits for the agents that write code, and stops a quality failure from being attributed to a package that does not own the file.
+Since 2.20.1 the test-author and QA are told the quality limits, and a violation in their files stops the run at verification naming their zone. Nobody fixes those files then: review, QA and documentation do not start until a person steps in. The flow already has a mechanism that catches a defect while its author can still fix it: the stop gate, which refuses an implementer's finished report when the acceptance tests of its package fail, at most twice. This release gives the same gate a second check, for the test-author and for QA: when either submits a finished report, the hook measures the files of its own zone against the quality limits and, if one is over, refuses the report with the violation lines. The agent fixes them in the same call, with its context intact, and for the test-author before any code exists. It closes issue 134.
 
 ## 2. Scope
 
 ### Included
 
-- **The limits in the prompt.** The plan's rules text, which already reaches the implementer, the test-author, the standards reviewer and QA, ends with one sentence stating the limits the project's quality baseline enforces. The one-off commands print it too. No baseline, no sentence.
-- **Quality failures attributed by path only.** In the quality phase a violation names a file, so the package that owns that file is the suspect. A criterion's number in a file or function name (`test_ac_001_…`) no longer makes the package that answers for that criterion a suspect.
-- **The owning zone is named.** When a quality violation is in the acceptance zone or in QA's zone, `verify`'s result says so in a new key, `zone_suspects`, and `/implement` presents it.
-- **Release 2.20.1**: notes, the budget.
+- **A zone check in the stop gate.** For the owner of the acceptance zone (`AT`) and the owner of QA's zone (`QA`): a finished report is refused while a file of that zone is over a quality limit, with the violation lines and the count of denials.
+- **The same cap and reset as the package gate.** At most two denials per agent and stage; the third report goes through, and the run then stops at verification as it does today. `open-stage` resets the count.
+- **Only the zone is measured.** The check reads the files of the agent's zone, not the project: 0.38 s for an acceptance zone of 155 files and 19,531 lines, measured on a real project (the whole project took 1.08 s).
+- **Docs and release 2.21.0**: the guide's line on the stop gate, the notes, the budget, one acceptance file.
 
 ### Excluded (non-goals)
 
-- Sending the test-author (or QA) to a fix cycle for its own files: a new path in both engines, and the workflow script is 30 lines from its recorded size limit. With the limits printed the case should be rare; issue 134 keeps the proposal.
-- A `validate` warning about section 7.
-- Any change to the engines, their prompts or the conformance scenarios.
-- Attribution in the other phases: a failing test still names the package through its criterion.
+- A fix cycle for the test-author or QA after verification (issue 134's own proposal): a new path in both engines, and it would reopen the acceptance tests once the code exists. Discarded with the user in favour of this gate.
+- Any change to the engines, their prompts, the plan or the conformance scenarios.
+- The denials of `AT` and `QA` in the run's record: the engines read the gate's summary line for packages only. See section 11.
+- Changing the package gate: an implementer's report is checked as today.
+- The agents' definitions: the denial's own text says what to do.
 
 ## 3. Stack
 
@@ -33,59 +34,58 @@ Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workfl
 ## 4. Repository structure
 
 ```
-.claude/bin/verification.py         WP-01  attribution of the quality phase, zone_suspects, the limits' sentence
-.claude/bin/test_zone_attribution.py WP-01  new: unit cases of the quality phase's attribution
-.claude/bin/launch.py               WP-02  the plan and the one-off prompts end with the limits
-.claude/commands/implement.md       WP-02  how to present zone_suspects
-.claude/bin/test_launcher.py        WP-02
-.claude-plugin/plugin.json          WP-03  2.20.1
-.claude/bin/upgrade.py              WP-03  NOTES["2.20.1"]
-.claude/flow-budget.json            WP-03
-.claude/bin/test_acceptance_v220.py WP-03  the version it pins
-docs/how-it-works.md                WP-03  the glossary's line on failed verifications
-.claude/bin/test_quality_limits.py  AT     the acceptance tests of this fix
-.claude/flow-history.json           by hand: regenerated as the last commit
+.claude/bin/core.py                  WP-01  the statuses that count as a finished report, per zone
+.claude/bin/verification.py          WP-01  the quality violations of one zone
+.claude/bin/stage.py                 WP-01  the zone check of the stop gate
+.claude/bin/guardrail.py             WP-01  report_gate asks it for AT and QA
+.claude/bin/test_zone_gate.py        WP-01  new: unit cases
+docs/how-it-works.md                 WP-02  the glossary's line on the stop gate
+.claude-plugin/plugin.json           WP-02  2.21.0
+.claude/bin/upgrade.py               WP-02  NOTES["2.21.0"]
+.claude/flow-budget.json             WP-02
+.claude/bin/test_native_usage.py     WP-02  the classes moved from test_acceptance_v220.py
+.claude/bin/test_acceptance_v220.py  WP-02  deleted
+.claude/bin/test_acceptance_v221.py  AT
+.claude/flow-history.json            by hand: regenerated as the last commit
 ```
 
 ## 4b. Existing code context
 
 | What an implementer needs to know | Where it is | Pattern or rule | Source |
 |---|---|---|---|
-| `attribute(manifest, lines)` maps a failure's output to packages: by a file path of theirs, or by an `AC-NNN` found in the text (case-insensitive, `AC`, `ac_`, `AC-`) through the package's `acs` | `.claude/bin/verification.py:249-266` | The function to change: the criteria route is wrong for the quality phase | read |
-| `verify` builds `suspects` from every failing phase's output with `attribute`, and prints `{"ok", "blocking", "preexisting_failures", "suspects", "phases"}` | `.claude/bin/verification.py:288-336` | Where the quality phase is told apart and `zone_suspects` is added | read |
-| The quality phase: name `quality`, its output is, per violation, `FAIL file <path> exceeds its <metric> allowance` or `FAIL function <path>::<name> exceeds its <metric> allowance`, then a detail line `  <key> <metric>: now N, allowed M` | `.claude/bin/verification.py:142-149`, `.claude/bin/quality.py:238-243` | The lines that are attributed; a function's name can carry a criterion's number | read |
-| The baseline: `quality_state()` is None without `.claude/quality-baseline.json`, `{"unreadable": True}` when it is not a JSON object | `.claude/bin/verification.py:100-114` | No baseline or an unreadable one: no limits are printed | read |
-| The limits: `quality.limits_of(baseline)` is the defaults (`function_lines` 60, `test_function_lines` 100, `nesting` 4, `file_lines` 800, `file_growth` 30, `line_chars` 120) overridden by the baseline's `limits` | `.claude/bin/quality.py:18-19`, `.claude/bin/quality.py:58-59` | Reuse it; `quality_module()` is how `verification.py` reaches `quality.py` | read |
-| The acceptance zone and QA's zone: `at_entity(manifest)["files"]` and `qa_entity(manifest)["files"]` | `.claude/bin/core.py:226-233` | A path ending in `/` owns the folder | read |
-| The engines turn `suspects` into defects only for ids that are packages; with none they stop with "a verification phase fails and no work package owns the failure (see verification)" and the whole `verify` output is in the result's `verification` | `.claude/bin/pipeline.py:280-293`, `.claude/bin/pipeline.py:668-676` | Unchanged: a new key of `verify`'s output reaches the result as it is | read |
-| `pipeline_plan` puts `rules_text` and its checksum in the plan; `render_prompt` builds the one-off commands' prompts | `.claude/bin/launch.py:302-307`, `.claude/bin/launch.py:661-675` | The two places that print rules | read |
-| `launch.py` reaches `verification.py` through `stage.py` already | `.claude/bin/stage.py:23` | `from verification import quality_limits_text` in `launch.py` adds no cycle | read |
-| The stop gate also calls `attribute`, for a package's own failing tests | `.claude/bin/stage.py:308-312` | Unchanged: it keeps the default (criteria on) | read |
-| Tests of `attribute` | `.claude/bin/test_agentic.py:524-563` | They call it with two arguments: they stay green. That file is 3 lines from its quality allowance (1,876 of 1,879): new cases go in a new file, not there | read |
-| `agentic.py` imports `launch` when it starts, so every command, the hook included, fails if `launch.py` imports a name that does not exist yet | `.claude/bin/agentic.py:100-110` | Why WP-02 comes after WP-01 | read |
-| Tests that read the plan's rules text | `.claude/bin/test_launcher.py:213-230` | Their temporary repo has no quality baseline: the text is unchanged there | read |
-| `/implement` presents failed verifications and their suspects | `.claude/commands/implement.md:59-73` | The bullet that gains `zone_suspects` | read |
-| The release pattern for a fix: the notes, the version, and the version the current acceptance file pins | `.claude/bin/upgrade.py:156-170`, `.claude/bin/test_acceptance_v220.py:250-256` | As 2.18.1 did | read |
+| The hook hands a `StructuredOutput` call (an agent's report) to `report_gate(owner_id, tinput)`, which today acts only when the owner is a package (`WP_ID_RE`): it asks `gate_check` and, with failing lines, calls `block(...)` with a message that names the owner, the status, "denial N of 2" and the lines | `.claude/bin/guardrail.py:284-296`, `.claude/bin/guardrail.py:346-354` | The function that gains the zone branch; `block` exits 2 and the agent reads the message | read |
+| `gate_check(owner_id, status)`: None lets the report through, a list of lines refuses it. It lets through when the status is not a finished one, the denials are used up, or anything goes wrong (it fails open, printing "[agentic guard] gate skipped: …"). On a refusal it adds one to the owner's denials in `gate.json` and keeps the lines shown | `.claude/bin/stage.py:322-348` | The shape to mirror for the zone check: same cap, same counter, same fail-open | read |
+| The gate's constants: `GATE_MAX_DENIALS = 2`, `GATE_MAX_LINES = 40`, `GATE_STATUSES = ("DONE", "DONE_WITH_CONCERNS")` | `.claude/bin/core.py:37-41` | The zone statuses go beside them | read |
+| The counters: `gate_denials(fn)` reads and writes `gate.json` under a lock; `gate_reset(owners)` drops the counters of the ids given | `.claude/bin/stage.py:296-305` | Reuse both; the zone's key is its id, `AT` or `QA` | read |
+| `open-stage` resets the gate of the stage's owners; for the stages `acceptance` and `qa` the owner is the zone's entity, whose id is `AT` or `QA` | `.claude/bin/stage.py:29`, `.claude/bin/stage.py:57-60`, `.claude/bin/stage.py:220-228` | A reopened stage (the test-author's revision, a QA re-check) gets its own two denials with no new code | read |
+| The zones: `at_entity(manifest)["files"]` and `qa_entity(manifest)["files"]`; `owns(pattern, path)` tells whether a path is under one | `.claude/bin/core.py:226-233`, `.claude/bin/core.py:261-263` | Unchanged | read |
+| The quality baseline and its helpers: `quality_state()` (None without a baseline, `{"unreadable": True}` when broken), `quality_files(state)` (every code file the ratchet measures), `quality_module()` with `measure(root, files, limits)`, `limits_of(state)` and `check(state, current)`, whose result has `violations` and `details`, one of each per violation | `.claude/bin/verification.py:100-140`, `.claude/bin/quality.py:207-262` | `check` only looks at the files it is given: measuring the zone's files gives the zone's violations | read |
+| A violation line and its detail: `FAIL file <path> exceeds its <metric> allowance` / `FAIL function <path>::<name> exceeds its <metric> allowance`, then `  <key> <metric>: now N, allowed M` | `.claude/bin/quality.py:238-243` | The lines shown to the agent, in pairs | read |
+| The reports' statuses: the test-author answers `DONE` or `BLOCKER`; QA answers `PASS`, `FAIL` or `BLOCKER` | `.claude/workflows/pipeline-spec.json:1-40` | A finished report is `DONE` for `AT`, `PASS` or `FAIL` for `QA` | read |
+| The hook's owner comes from the agent's claim or from `AGENTIC_WP`; the tests pass the latter | `.claude/bin/guardrail.py:346-350`, `.claude/bin/test_guardrail.py:203-216` | The tests of the zone gate run the hook with `env={"AGENTIC_WP": "AT"}` | read |
+| Tests of the package gate | `.claude/bin/test_guardrail.py:203-260` | They stay green: a package's report takes the same branch as today | read |
+| `stage.py` imports from `verification.py` already | `.claude/bin/stage.py:23` | The zone check may import the new helper there; nothing new reaches the hook's start-up, which a test pins | read |
+| The guide's line on the stop gate | `docs/how-it-works.md:389` | Line to extend (WP-02) | read |
+| The release pattern, and the acceptance file of the last minor release | `.claude/bin/upgrade.py:156-170`, `.claude/bin/test_native_usage.py:1-8` (where the last minor release's acceptance file ends up), `.claude/bin/test_qa_recheck.py:1-8` | Its classes move to a named file | read |
 
-What must not change: the engines, the conformance scenarios, attribution outside the quality phase, the plan's other keys, the text of a project without a quality baseline.
+What must not change: the package gate and its messages, the engines, `verify` and `zone_suspects`, what the hook does for every other tool call.
 
 ## 5. Data model
 
-`verify`'s output gains one key, always present:
-
 ```python
-"zone_suspects": {  # {} when the quality phase passes or names no file of those zones
-    "AT": {"phases": ["quality"], "files": ["acceptance/test_ac_001_money.py"]},
-    "QA": {"phases": ["quality"], "files": ["qa/test_qa.py"]},
-}
+# core.py, beside GATE_STATUSES
+ZONE_GATE_STATUSES = {"AT": ("DONE",), "QA": ("PASS", "FAIL")}  # a finished report, per zone
 ```
 
-`files` are the zone's files the violations name, sorted, as the violation prints them (repo-relative).
+`gate.json` keeps the zone's counter like a package's: `{"AT": {"denials": 1, "last": [<the lines shown>]}}`.
 
-The limits' sentence, with the values of `limits_of`. It starts and ends with a newline character (written `\n` below), which are part of it:
+The denial the agent reads (one message, `block`):
 
 ```
-\nQuality limits, checked on every file you write, tests included: no line over {line_chars} characters; no new file over {file_lines} lines; no new function over {function_lines} lines ({test_function_lines} in a test) or nested deeper than {nesting}. What is already over a limit has its own allowance in .claude/quality-baseline.json.\n
+{owner}: the report says {status} but files of your zone are over the quality limits (denial {n} of 2):
+  FAIL file acceptance/test_money.py exceeds its long_lines allowance
+    acceptance/test_money.py long_lines: now 3, allowed 0
+Bring those files within the limits (shorter lines, smaller functions, a large file split in two) without changing what they check, and submit the report again.
 ```
 
 ## 6. Contracts between modules
@@ -93,123 +93,131 @@ The limits' sentence, with the values of `limits_of`. It starts and ends with a 
 **`verification.py`:**
 
 ```python
-def attribute(manifest, lines, by_criteria=True)
-    """As today. by_criteria=False: only a file path of the package makes it a suspect; an AC-NNN in the text
-    does not, and "acs" is [] in every entry."""
-
-def zone_files(manifest, lines)
-    """{"AT": [paths], "QA": [paths]}, without the empty ones: the files of the acceptance zone and of QA's zone
-    that these lines name. A path is taken from a line of the quality phase: the text after "FAIL file " or
-    "FAIL function " up to the first " exceeds" (and, for a function, up to "::"). Sorted, each once."""
-
-def quality_limits_text()
-    """The sentence of section 5 for this project's baseline; "" without a baseline or with an unreadable one."""
+def zone_quality_lines(manifest, owner_id)
+    """The quality violations of the files of that owner's zone ("AT" or "QA"): each violation line followed by its
+    detail line, as quality_check prints them; [] when the zone is within the limits. Measures only the zone's
+    files. [] without a quality baseline, with an unreadable one, or for any other owner."""
 ```
 
-- In `verify`, the phase named `quality` is attributed with `by_criteria=False`; every other phase as today. Only when the quality phase's status is `regression` or `fails` (a `pre-existing failure` does not count), `zone_files` of the lines `verify` attributes for it (its scan, already reduced to the new failures in a regression) gives `zone_suspects`, each zone with `"phases": ["quality"]`. The key is in the printed JSON in every case, `{}` otherwise. The loop that builds `suspects` removes each phase's scan (`ph.pop("_scan", [])`): the zones are read from the quality phase's scan inside that loop, never after it.
-- A file under a zone is told by `owns(zone_path, file)` semantics: equal, or inside a path that ends in `/` (`core.owns`).
+**`stage.py`:**
 
-**`launch.py`:**
+```python
+def zone_gate_check(owner_id, status)
+    """The stop gate for the owner of a zone. None lets the report through; a list of lines refuses it. Lets
+    through when the owner is not "AT" or "QA", the status is not one of ZONE_GATE_STATUSES[owner_id], the owner
+    used up its denials, the zone is within the limits, or anything at all goes wrong: it catches Exception (with
+    `# noqa: BLE001`, as the hook's entry point does) and prints the same "[agentic guard] gate skipped: ..." line
+    as gate_check. On a refusal it adds one to the owner's denials and
+    stores the lines shown: the first GATE_MAX_LINES lines, violations and their details counted together."""
+```
 
-- `pipeline_plan`: `printed = rules_text(manifest, native=injected_by_claude_code()) + quality_limits_text()`, used for `rules_text` and its checksum.
-- `render_prompt`: `rules = "" if silent else rules_text(manifest) + quality_limits_text()`. The guard stays where it is: an implementer the spec keeps the rules away from gets no limits either.
-- A project with a baseline and no rule files gets the limits alone. That is intended: its agents still write code under those limits. The engines then report `rules` as `printed`, which is true of what the prompt carries.
+**`guardrail.report_gate(owner_id, tinput)`:** unchanged for a package. For any other owner it asks `zone_gate_check(owner_id, tinput.get("status"))` and, with lines, calls `block` with the message of section 5 (the count read from `gate_denials` after the refusal, as the package branch does).
 
-**`/implement`:** when the saved result's `verification.zone_suspects` is not empty, the Verification part says that the quality failure is in the acceptance tests (`AT`) or QA's tests (`QA`), names the files, and says no package can fix them: the person fixes those files or relaunches that agent.
+The order of the checks inside `zone_gate_check` is the package gate's: status, then the cap, then the measurement. A report that is not finished costs no measurement.
+
+Why every exception is caught here, and not only the three `gate_check` catches: the zone check runs the quality code over a baseline a person may have edited (`{"files": "x"}` raises `AttributeError` in `check`, `{"limits": {"line_chars": "x"}}` raises `TypeError` in `measure`), and the hook turns an uncaught exception of a zoned agent into a refusal with no count (`.claude/bin/guardrail.py:630-644`): every report would be refused, with no cap.
 
 ## 7. Conventions
 
 - English everywhere; usage errors keep the `Uso:` prefix (design 0016).
 - No type annotations in signatures (Python 3.9), as in the rest of `.claude/bin`. This overrides the python rules' "type annotations on every public signature": it is the existing code's style, not a finding.
 - Every `open` and `read_text` names `encoding="utf-8"`.
-- This repository's own quality phase measures `.claude/bin`, the acceptance tests of this fix included: no line over 120 characters, no new function over 60 lines (100 in a test), no new file over 800 lines.
+- The gate fails open: no error of its own may refuse a report. In `zone_gate_check` that means `except Exception`, the one place this design allows it.
+- This repository's own quality phase measures `.claude/bin`, the tests of this design included: no line over 120 characters, no new function over 60 lines (100 in a test), no new file over 800 lines.
 - The guides do not cite flow version numbers. Commit format `type: summary`; the flow history is regenerated as the last commit.
 
 ## 8. Work packages and acceptance criteria
 
 ### Acceptance criteria
 
-- AC-001 · A quality failure on an acceptance file does not name a package
-  - Scenario: a temporary repo whose manifest gives `WP-01` the file `src/a.py` and the criterion `AC-001`, with a quality baseline created by `agentic.py quality --init`. The manifest has no `verify` commands and its acceptance command passes (a script that exits 0), so `quality` is the only phase that can fail; the tests' `Repo` helper (`.claude/bin/test_agentic.py:45-76`) builds the repo from a manifest the test declares (one package, `WP-01`, with `"acs": ["AC-001"]`, and `"acceptance": {"files": ["acceptance/"], "command": "<python> acc.py"}`), and the test writes `acc.py` with `raise SystemExit(0)`. After the baseline, `acceptance/test_ac_001_money.py` is written with one line of 130 characters.
-  - Action: `agentic.py verify`.
-  - Expected: exit 3; `blocking` contains `quality`; `suspects` is `{}`; `zone_suspects` is `{"AT": {"phases": ["quality"], "files": ["acceptance/test_ac_001_money.py"]}}`. Today `suspects` names `WP-01`: this is the bug.
-  - Must not: `WP-01` in `suspects`.
-  - Check: `test_quality_limits.py`
+- AC-001 · The test-author's finished report is refused while a file of its zone is over a limit
+  - Scenario: a temporary repo built by the tests' `Repo` helper (`.claude/bin/test_agentic.py:45-76`) with its default manifest, a file `src/a.py` holding `x = 1`, and a quality baseline created by `agentic.py quality --init`. After the baseline, `acceptance/test_money.py` is written with one line of 130 characters.
+  - Action: the hook receives a `StructuredOutput` call whose input has `"status": "DONE"`, with `AGENTIC_WP=AT`.
+  - Expected: exit 2. The message on stderr contains `AT: the report says DONE`, `over the quality limits`, `denial 1 of 2`, `FAIL file acceptance/test_money.py exceeds its long_lines allowance` and `without changing what they check`. `.claude/state/gate.json` holds `AT` with `"denials": 1`.
+  - Must not: exit 0 while the file is over the limit and denials remain.
+  - Check: `test_acceptance_v221.py`
   - WP: WP-01
 
-- AC-002 · The package that owns the file is still the suspect, and QA's zone is named too
-  - Scenario: as AC-001, plus `src/a.py` with one line of 130 characters and `qa/test_qa.py` with one.
-  - Action: `agentic.py verify`.
-  - Expected: `suspects` is `{"WP-01": {"phases": ["quality"], "files": ["src/a.py"], "acs": []}}`; `zone_suspects` names `AT` with the acceptance file and `QA` with `qa/test_qa.py`.
-  - Must not: a file of one zone listed under another.
-  - Check: `test_quality_limits.py`
+- AC-002 · A zone within the limits, a report that is not finished, and other people's files do not refuse
+  - Scenario: as AC-001.
+  - Action: the same call (a) after the long line is shortened; (b) with the long line and `"status": "BLOCKER"`; (c) with the acceptance file clean and a line of 130 characters in `src/a.py` and in `qa/test_qa.py`.
+  - Expected: exit 0 in the three cases; no `AT` entry is added to `gate.json` by any of them.
+  - Must not: a violation outside the acceptance zone refusing the test-author.
+  - Check: `test_acceptance_v221.py`
   - WP: WP-01
 
-- AC-003 · Outside the quality phase nothing changes
-  - Scenario: the manifest of AC-001.
-  - Action: `verification.attribute(manifest, ["test_ac_001_total FAILED"])`, the same with `by_criteria=False`, and `agentic.py verify` in a repo whose quality phase passes.
-  - Expected: the first names `WP-01` with `acs` `["AC-001"]`; the second is `{}`; `verify`'s output has `"zone_suspects": {}`.
-  - Must not: a changed result for any existing call with two arguments.
-  - Check: `test_quality_limits.py`
+- AC-003 · Two denials at most, and a stage that opens starts again
+  - Scenario: as AC-001, the file left over the limit.
+  - Action: the same `DONE` call three times; then `agentic.py open-stage acceptance`; then the call once more.
+  - Expected: exits 2, 2, 0 (`denial 1 of 2`, `denial 2 of 2`, then let through); after `open-stage`, exit 2 with `denial 1 of 2`.
+  - Must not: a third denial without a reset.
+  - Check: `test_acceptance_v221.py`
   - WP: WP-01
 
-- AC-004 · The limits are printed where the rules are
-  - Scenario: a temporary repo with the python stack's rules installed and a quality baseline whose `limits` set `line_chars` to 100.
-  - Action: `agentic.py pipeline-plan`; `agentic.py run-wave 1` with the tests' fake `claude`; then both again after deleting the baseline.
-  - Expected: with the baseline, `rules_text` ends with the sentence of section 5 carrying `no line over 100 characters`, `no new file over 800 lines` and `no new function over 60 lines (100 in a test) or nested deeper than 4`; `rules_sum` is the checksum of the whole text; the implementer's prompt of `run-wave` ends with the same sentence. Without the baseline neither text contains "Quality limits".
-  - Must not: the sentence before the rules, or twice.
-  - Check: `test_quality_limits.py`
-  - WP: WP-02
+- AC-004 · QA is held to its own zone
+  - Scenario: as AC-001, with `qa/test_qa.py` holding one line of 130 characters and the acceptance zone clean.
+  - Action: the hook receives a report with `AGENTIC_WP=QA` and status `PASS`, then `FAIL`, then (after `open-stage qa`) `BLOCKER`.
+  - Expected: exit 2 for `PASS` (`QA: the report says PASS`, `denial 1 of 2`, the file named) and for `FAIL` (`denial 2 of 2`); exit 0 for `BLOCKER`. In a fresh repo with the QA file clean and `acceptance/test_money.py` over the limit, a `PASS` report exits 0.
+  - Must not: QA refused for a file of the acceptance zone.
+  - Check: `test_acceptance_v221.py`
+  - WP: WP-01
 
-- AC-005 · /implement presents the zone
-  - Scenario: `.claude/commands/implement.md`.
-  - Action: read it.
-  - Expected: one line of it contains all of `` `zone_suspects` ``, `` `AT` ``, `` `QA` `` and the literal phrase `no package can fix them`.
-  - Must not: that line contains "fix cycle".
-  - Check: `test_quality_limits.py`
-  - WP: WP-02
+- AC-005 · Without a baseline, or with what the baseline already allows, nothing is refused
+  - Scenario: four repos like AC-001's: one whose baseline is deleted; one whose baseline file holds `[1]`; one whose baseline file holds `{"limits": {"line_chars": "x"}}` (an object of the wrong shape: comparing a line's length with it raises `TypeError`); one where the acceptance file with the long line exists before `quality --init`, so the baseline records its allowance.
+  - Action: the `DONE` call with `AGENTIC_WP=AT` in each.
+  - Expected: exit 0 in the four; no `Traceback` on stderr; `gate.json` gains no `AT` entry.
+  - Must not: a refusal the agent cannot fix by editing its files.
+  - Check: `test_acceptance_v221.py`
+  - WP: WP-01
 
-- AC-006 · Release 2.20.1
+- AC-006 · A package's report is checked as before
+  - Scenario: the repo of AC-001 with the acceptance file over the limit and an acceptance command that passes.
+  - Action: the hook receives an implementer's report with status `DONE` and `AGENTIC_WP=WP-01`; and a report with status `PASS` and `AGENTIC_WP=REVIEW`. The test writes `acc.py` with `raise SystemExit(0)`: the default manifest's acceptance command runs it.
+  - Expected: exit 0 in both; `gate.json` gains no entry.
+  - Must not: a package or the reviewer refused for the quality of a zone.
+  - Check: `test_acceptance_v221.py`
+  - WP: WP-01
+
+- AC-007 · Docs and release 2.21.0
   - Scenario: this repository.
-  - Action: read `plugin.json`, `upgrade.NOTES`, the guide.
-  - Expected: version `2.20.1`; `NOTES["2.20.1"]` has at least two notes: one contains `quality limits` (lower case), another contains `zone_suspects`; `docs/how-it-works.md` contains `zone_suspects`.
-  - Must not: `2.20.1` anywhere in `docs/how-it-works.md`.
-  - Check: `test_quality_limits.py`
-  - WP: WP-03
+  - Action: read `plugin.json`, `upgrade.NOTES`, `docs/how-it-works.md`, the test files.
+  - Expected: version `2.21.0`; `NOTES["2.21.0"]` has at least one note that contains `stop gate` and `test-author`, and it is the key right above `"2.20.2"`; the guide's line that starts `- **Stop gate:**` contains `test-author` and `QA`; the only `test_acceptance*.py` is `test_acceptance_v221.py`; `test_native_usage.py` holds the classes `UsageOfARunTests`, `SaveResultTests`, `NativeRulesTests` and `DefinitionTests`.
+  - Must not: `2.21.0` anywhere in `docs/how-it-works.md`.
+  - Check: `test_acceptance_v221.py`
+  - WP: WP-02
 
 ### Work packages
 
-#### WP-01 · Attribution of the quality phase, and the limits' sentence
+#### WP-01 · The zone check of the stop gate
 - Wave 1.
-- Files: `.claude/bin/verification.py`, `.claude/bin/test_zone_attribution.py`.
-- Implements the `verification.py` contracts of section 6.
-- ACs: AC-001, AC-002, AC-003.
-- **Patterns to mirror:** `.claude/bin/verification.py:249-266` (how a path is matched whole); `.claude/bin/verification.py:320-336` (how `suspects` is built and printed); `.claude/bin/test_agentic.py:524-563` (the attribution tests).
+- Files: `.claude/bin/core.py`, `.claude/bin/verification.py`, `.claude/bin/stage.py`, `.claude/bin/guardrail.py`, `.claude/bin/test_zone_gate.py`.
+- Implements sections 5 and 6 whole.
+- ACs: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006.
+- **Patterns to mirror:** `.claude/bin/stage.py:322-348` (`gate_check`: the order of its checks, its counter, its fail-open); `.claude/bin/guardrail.py:284-296` (how a refusal is turned into the message); `.claude/bin/verification.py:116-140` (how the files are listed, measured and checked); `.claude/bin/test_guardrail.py:203-260` (how the gate's tests call the hook and read `gate.json`); `.claude/bin/test_zone_attribution.py:55-70` (how a unit case patches the baseline).
 - **Gotchas:**
-  - `verification.py` is 336 lines and `verify` is 49: both under the quality ratchet (a function of at most 60 lines). Build `zone_suspects` in a helper, not inside `verify`.
-  - Do not add to `test_agentic.py`: it is 3 lines from its quality allowance. The unit cases go in `test_zone_attribution.py`.
-  - A detail line (`  <key> <metric>: now N, allowed M`) repeats the path: take paths from the `FAIL` lines only.
-  - `quality_limits_text` must return `""` for `{"unreadable": True}`.
-  - `test_lean.py`'s budget check is red until WP-03 raises the budget: expected in waves 1 and 2, so the whole `.claude/bin` suite is red there for that one test.
-- **Exact imports and APIs:** `at_entity`, `qa_entity`, `owns` from `core`; `quality_module().limits_of`, `quality_state()` in the same file.
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_zone_attribution.py"`; `python3 -m unittest discover -s .claude/bin -p "test_agentic.py"`; `python3 -m unittest discover -s .claude/bin -p "test_quality.py"`; `python3 .claude/bin/agentic.py quality`.
+  - Measure only the zone: `[f for f in quality_files(state) if any(owns(z, f) for z in zone)]`, then `measure` and `check`. `check` over those files alone yields only their violations. Pair each violation with its detail as `quality_check` does (`.claude/bin/verification.py:137`).
+  - `verification.py` already has `ZONES = (("AT", at_entity), ("QA", qa_entity))` (`.claude/bin/verification.py:269-281`, design 0028): take the zone's entity from it instead of branching on the ids again.
+  - Unit cases: `core.ROOT` is fixed when the module is imported, so `test_zone_gate.py` cannot point the in-process functions at a temporary repo. Go through the tests' `Repo.run` for anything that measures files (patching `quality_state` and `quality_files` alone would still read this repository's files); `mock.patch.object`, as `.claude/bin/test_zone_attribution.py:55-70` uses it, is for the cases that never reach the measurement (no baseline, an unreadable one, an error raised inside).
+  - `quality_state()` returns `{"unreadable": True}` for a broken baseline: return `[]` before measuring.
+  - `zone_gate_check` catches `Exception` and lets the report through (section 6 says why).
+  - `report_gate` keeps `WP_ID_RE.fullmatch(owner_id)` for the package branch; the zone branch is the `else`, and `zone_gate_check` itself returns None for any owner that is not `AT` or `QA` (the reviewer, the doc-updater, no owner at all).
+  - `guardrail.py` is 644 lines and `stage.py` 348, under the quality ratchet (a file of at most 800 lines, a function of at most 60).
+  - `test_agentic.py` and `test_guardrail.py` are not to grow: the unit cases go in `test_zone_gate.py`.
+  - `test_lean.py`'s budget check is red until WP-02 raises the budget, so the whole `.claude/bin` suite is red for that one test in wave 1: expected.
+  - `test_acceptance_v220.py`'s `ReleaseTests` ("the only acceptance file") is red from wave 0, as soon as `test_acceptance_v221.py` exists, until WP-02 moves that file: expected, not a regression.
+- **Exact imports and APIs:** `from verification import zone_quality_lines` in `stage.py` (it imports from there already); `ZONE_GATE_STATUSES`, `GATE_MAX_DENIALS`, `GATE_MAX_LINES` from `core`; `zone_gate_check` beside `gate_check` in `guardrail.py`'s import from `stage`.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_zone_gate.py"`; `python3 -m unittest discover -s .claude/bin -p "test_guardrail.py"`; `python3 -m unittest discover -s .claude/bin -p "test_hook_path.py"`; `python3 .claude/bin/agentic.py quality`.
 
-#### WP-02 · The plan, the one-off prompts and /implement
-- Wave 2: `launch.py` imports `quality_limits_text`, and `agentic.py` imports `launch` on every command, so the function must exist first.
-- Files: `.claude/bin/launch.py`, `.claude/commands/implement.md`, `.claude/bin/test_launcher.py`.
-- Consumes `quality_limits_text` by implementation (WP-01).
-- ACs: AC-004, AC-005.
-- **Patterns to mirror:** `.claude/bin/launch.py:302-307` and `.claude/bin/launch.py:661-675` (the two places); `.claude/commands/implement.md:59-73` (one bullet per part).
-- **Gotchas:** the checksum is of the text actually put in the plan, limits included, or both engines fall back to naming the paths. `launch.py` and `implement.md` are budgeted: one import, two call sites, one sentence. `test_lean.py`'s budget check is red until WP-03.
-- **Exact imports and APIs:** `from verification import quality_limits_text` in `launch.py`.
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_launcher.py"`; `python3 -m unittest discover -s .claude/bin -p "test_pipeline.py"`; `python3 -m unittest discover -s .claude/bin -p "test_definitions.py"`; `node .claude/bin/test_workflow.mjs`.
-
-#### WP-03 · Notes and release
-- Wave 3.
-- Files: `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v220.py`, `docs/how-it-works.md`.
-- ACs: AC-006.
-- **Patterns to mirror:** `.claude/bin/upgrade.py:156-170`; `.claude/bin/test_acceptance_v220.py:250-256` (the version it pins); `docs/how-it-works.md:389-392` (the glossary's line on failed verifications).
-- **Gotchas:** `NOTES["2.20.1"]` goes right above `"2.20.0"` in the dictionary. A fix release keeps the current acceptance file and changes only the version it pins, as 2.18.1 did. `flow-budget.json`: raise only what is exceeded, with its why. `.claude/flow-history.json` is regenerated by the maintainer as the last commit.
+#### WP-02 · Docs, notes, release and the moved tests
+- Wave 2 (it moves the previous acceptance file and raises the budget, after the code).
+- Files: `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_native_usage.py`, `.claude/bin/test_acceptance_v220.py`.
+- ACs: AC-007.
+- **Patterns to mirror:** `.claude/bin/upgrade.py:156-170`; `.claude/bin/test_qa_recheck.py:1-8` (the header of a file of moved tests); `docs/how-it-works.md:389` (the line to extend).
+- **Gotchas:**
+  - Move the classes of `test_acceptance_v220.py` with their helpers and constants (`RulesRepo` included). Drop its `ReleaseTests`: it pins the version and "the only acceptance file".
+  - `NOTES["2.21.0"]` goes right above `"2.20.2"` in the dictionary.
+  - `flow-budget.json`: raise only what is exceeded, with its why.
+  - `.claude/flow-history.json` is regenerated by the maintainer as the last commit, not by this package.
 - **WP validation:** the five commands of section 3 and `python3 -m unittest discover -s acceptance`.
 
 ```json wp-manifest
@@ -217,45 +225,44 @@ def quality_limits_text()
   "maintainer": true,
   "stack": ["python", "typescript"],
   "allow_bash": ["Bash(python3 -m unittest:*)", "Bash(node .claude/bin/test_workflow.mjs)"],
-  "acceptance": {"files": [".claude/bin/test_quality_limits.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_quality_limits.py"},
+  "acceptance": {"files": [".claude/bin/test_acceptance_v221.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_acceptance_v221.py"},
   "verify": {"build": "python3 -m unittest discover -s bench -p \"test_*.py\"", "lint": "node .claude/bin/test_workflow.mjs", "types": "python3 -m unittest discover -s bench/acceptance", "tests": "python3 -m unittest discover -s .claude/bin -p \"test_*.py\""},
   "docs": {"files": ["docs/assets/"], "codemap": null},
   "work_packages": [
-    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/verification.py", ".claude/bin/test_zone_attribution.py"],
-     "acs": ["AC-001", "AC-002", "AC-003"], "mirror": [".claude/bin/verification.py:249-266", ".claude/bin/verification.py:320-336", ".claude/bin/test_agentic.py:524-563"]},
-    {"id": "WP-02", "wave": 2, "depends_on": ["WP-01"], "files": [".claude/bin/launch.py", ".claude/commands/implement.md", ".claude/bin/test_launcher.py"],
-     "acs": ["AC-004", "AC-005"], "mirror": [".claude/bin/launch.py:302-307", ".claude/bin/launch.py:661-675", ".claude/commands/implement.md:59-73"]},
-    {"id": "WP-03", "wave": 3, "depends_on": ["WP-01", "WP-02"], "files": [".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v220.py", "docs/how-it-works.md"],
-     "acs": ["AC-006"], "mirror": [".claude/bin/upgrade.py:156-170", ".claude/bin/test_acceptance_v220.py:250-256", "docs/how-it-works.md:389-392"]}
+    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/core.py", ".claude/bin/verification.py", ".claude/bin/stage.py", ".claude/bin/guardrail.py", ".claude/bin/test_zone_gate.py"],
+     "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-005", "AC-006"], "mirror": [".claude/bin/stage.py:322-348", ".claude/bin/guardrail.py:284-296", ".claude/bin/verification.py:116-140", ".claude/bin/test_guardrail.py:203-260", ".claude/bin/test_zone_attribution.py:55-70"]},
+    {"id": "WP-02", "wave": 2, "depends_on": ["WP-01"], "files": ["docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_native_usage.py", ".claude/bin/test_acceptance_v220.py"],
+     "acs": ["AC-007"], "mirror": [".claude/bin/upgrade.py:156-170", ".claude/bin/test_qa_recheck.py:1-8", "docs/how-it-works.md:389"]}
   ]
 }
 ```
 
 ## 9. Test strategy
 
-- **Acceptance** (`test_quality_limits.py`, written first and red): AC-001 to AC-003 run `verify` in temporary repos with a real quality baseline; AC-004 reads the plan and a fallback prompt; AC-005 and AC-006 read files. AC-001 must fail today by naming `WP-01`: it reproduces the bug. Nothing is spent.
-- **Unit:** the attribution cases go in `test_zone_attribution.py`.
-- **Teeth:** each behaviour is broken once by hand (criteria left on for quality, the zone left out, the limits missing from the checksum) and the acceptance test must fail.
-- **By hand, before the pull request:** `acceptance/`, `qa/`, the installed-project job, and `agentic.py flow-history` as the last commit with its `--check`.
+- **Acceptance** (`test_acceptance_v221.py`, written first and red): AC-001 to AC-006 run the real hook (`agentic.py hook`, the report on stdin) in temporary repos with a real quality baseline, and read its exit code, its message and `gate.json`. AC-007 reads files. Nothing is spent.
+- **Unit:** `test_zone_gate.py` covers `zone_quality_lines` and `zone_gate_check` directly: a function over its limit, a zone declared as one file, more than `GATE_MAX_LINES` lines, an error inside the check.
+- **Teeth:** each behaviour is broken once by hand (the whole project measured instead of the zone, the cap ignored, `BLOCKER` gated, a package sent to the zone check) and the acceptance test must fail.
+- **By hand, before the pull request:** the time of the zone check on a real project's acceptance zone, reported in the pull request; `acceptance/`, `qa/`, the installed-project job, and `agentic.py flow-history` as the last commit with its `--check`.
 
 ## 10. Decisions
 
 | Decision | Discarded | Why |
 |---|---|---|
-| The limits travel in the rules text of the plan | A line in every brief; a new placeholder in each prompt | The rules text already reaches exactly the agents that write code or judge it by the rules, in both engines and in the one-off commands: no engine line, no scenario, one sentence |
-| The values come from the project's baseline | The defaults, hard-coded | A project may set its own limits; printing others would mislead |
-| No baseline, no sentence | Print the defaults anyway | Without a baseline the quality phase does not run: a limit nobody checks is noise |
-| The quality phase is attributed by path only | Keep the criteria route everywhere | A quality violation names the file at fault. A criterion's number in a test's name says which package must make the test pass, not who wrote too long a line; the package cannot edit that file |
-| The owning zone is reported in `zone_suspects`, and the run stops as it does today when no package owns the failure | Send the test-author or QA to a fix cycle | Left out by the user for now: a new path in both engines, with the workflow script 30 lines from its recorded limit. The run stops at once instead of spending two fix cycles, and says whose files they are |
-| A new key beside `suspects` | Add `AT` and `QA` to `suspects` | The engines read `suspects` and skip what is not a package; a different key cannot be mistaken for a package by an older reader |
-| Three waves of one package each | Two packages in wave 1 | `launch.py` cannot import a function that does not exist yet without breaking every `agentic.py` command, the hook included; and the release comes last. The packages are small, so the chain costs little |
-| A fix release, 2.20.1, that keeps the current acceptance file | A minor release with its own acceptance file | It repairs behaviour the flow already claimed (verification names who owns a failure); as 2.18.1 did, its tests live in a named file |
-| How the packages of the 2.11.0 runs came to be named is not reproduced | Reproduce on 2.11.0 | Those runs are the user's report. What is reproduced is the route that exists today: a criterion's number in the name of an acceptance file or function |
+| The stop gate checks the zone when its owner submits a finished report | A fix cycle for the test-author after verification (issue 134's proposal) | The gate catches the violation while the agent still has its context and, for the test-author, before any code exists: nobody reopens the acceptance tests once code is written against them. It is deterministic, needs no engine change (the workflow script is 30 lines from its recorded size limit) and no extra agent call. Chosen by the user |
+| Only the zone's files are measured | The project's whole quality check, filtered | 0.38 s against 1.08 s on a real project, in a hook call; and a violation elsewhere is not this agent's to fix |
+| The same cap, counter and reset as the package gate | A separate counter or no cap | One mechanism to understand. A gate with no cap can stall a run; after two denials the report goes through and verification names the zone, as since 2.20.1 |
+| QA is gated on `PASS` and on `FAIL` | Only on `PASS` | A report that found defects is as finished as one that found none, and its test files are just as measured |
+| `BLOCKER` is never gated | Gate every report | An agent that cannot go on must be able to say so |
+| The denial tells the agent not to change what the files check | Only list the violations | The cheapest way to shorten a test is to delete an assertion; the test-auditor still reviews the tests afterwards, but the instruction costs one clause |
+| The zones' denials are not in the run's record | A `GATE:` line for `AT` and `QA` | The engines parse that line for packages only; reporting them needs an engine change, which this design avoids. They are in `gate.json` |
+| A minor release, 2.21.0, with its own acceptance file | A fix release | It adds a behaviour to the hook; the 2.20.x fixes repaired behaviour the flow already claimed |
+| Two waves of one package each | One package | The release moves the previous acceptance file and raises the budget, which depend on the code's final size |
 | Written with Fable 5.2 | Pause to switch model | The user chose it at the model gate |
 
 ## 11. Risks and open questions
 
-- **A test-author that still breaks a limit stops the run at verification.** That is better than two wasted fix cycles, but review, QA and documentation still do not start until a person fixes the file or relaunches the agent. Issue 134's second proposal covers it.
-- **The sentence costs tokens on every call that prints rules:** about 60 words, not measured in tokens.
-- **A mixed failure** (a package's file and an acceptance file both over a limit) sends the package to fix its own file, and the next verification stops naming the zone: one fix cycle is spent, on a real defect of that package.
-- **Other languages' test files** follow the same rule: the limits come from one baseline and apply to every file the quality phase measures.
+- **The agent may fix the limit by weakening a test.** The denial says not to, and the test-auditor reviews the acceptance tests after the test-author; QA's tests have no later reviewer. Not measured.
+- **Two denials may not be enough** for a file far over a limit (1,025 lines against 800 was seen once). Then the report goes through and the run stops at verification, naming the zone: the state before this release.
+- **The time the check adds** to the one hook call that carries a report: 0.38 s for 155 files and 19,531 lines, measured once on one project. Not measured on larger zones or on Windows.
+- **The denials of `AT` and `QA` are not shown by `/implement`.** They are in `.claude/state/gate.json` until the next stage opens.
+- **Whether a `claude -p` agent's report reaches the hook as a `StructuredOutput` call** in the fallback engine is what the package gate already relies on; it is not re-verified here.
