@@ -1,9 +1,10 @@
-"""Acceptance tests of agentic-flow 2.20.0: AC-001 .. AC-007 of docs/architecture/0027 (the usage of a native run,
-read from Claude Code's own files; save-result --run; a result saved even without them; a native plan leaves the common
-rules to Claude Code and the fallback keeps them printed; /implement, the docs and the release).
+"""The native workflow's usage and rules: the usage of a native run, read from Claude Code's own files; save-result
+--run; a result saved even without them; a native plan leaves the common rules to Claude Code and the fallback keeps
+them printed; /implement. Moved as they were from test_acceptance_v220.py (design 0027, agentic-flow 2.20.0) when
+2.21.0 retired it (design 0029); the release checks stayed behind.
 
-Run: python3 -m unittest discover -s .claude/bin -p test_acceptance_v220.py
-Claude Code's files are built in a temporary config folder (Annex A of the design). Nothing is spent.
+Run: python3 -m unittest discover -s .claude/bin -p test_native_usage.py
+Claude Code's files are built in a temporary config folder (Annex A of design 0027). Nothing is spent.
 """
 import importlib
 import json
@@ -18,10 +19,8 @@ BIN = Path(__file__).resolve().parent
 ROOT = BIN.parents[1]
 CLAUDE = ROOT / ".claude"
 sys.path.insert(0, str(BIN))
-import core  # noqa: E402
 from test_agentic import MANIFEST, Repo, testutil  # noqa: E402
 
-FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own repo")
 RUN = "wf_test-001"
 RUN_DIR = f"projects/p/s/subagents/workflows/{RUN}"
 RECORD = {"runId": RUN, "status": "completed", "workflowProgress": [
@@ -244,30 +243,6 @@ class DefinitionTests(unittest.TestCase):
         self.assertNotIn("save-result .agentic-result.json`", text, "the step without --run")
         rules_step = next(line for line in text.splitlines() if "agentic.py rules-sync" in line)
         self.assertIn("Claude Code", rules_step)
-
-
-@FLOW_REPO_ONLY  # it reads this repository's docs and release files
-class ReleaseTests(unittest.TestCase):
-    def test_ac_007_release_2_20_0(self):
-        plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.20.2")
-        notes = module("upgrade").NOTES["2.20.0"]
-        self.assertGreaterEqual(len(notes), 2)
-        for words in ("usage", "rules"):
-            self.assertTrue(any(words in n for n in notes), words)
-        works = (ROOT / "docs/how-it-works.md").read_text(encoding="utf-8")
-        self.assertIn("save-result --run", works)
-        tree = [line for line in works.splitlines() if "usage.jsonl" in line and "├──" in line]
-        self.assertEqual(len(tree), 1)
-        self.assertIn("(fallback mode)", tree[0])
-        glossary = next(line for line in works.splitlines() if line.startswith("- **Stack and rules:**"))
-        self.assertIn("Claude Code", glossary)
-        self.assertIn("workflow_usage.py", works)
-        self.assertIn("workflow_usage", module("installer").INSTALL_BIN.split())
-        self.assertEqual(sorted(p.name for p in BIN.glob("test_acceptance*.py")), ["test_acceptance_v220.py"])
-        moved = (BIN / "test_qa_recheck.py").read_text(encoding="utf-8")
-        for name in ("QaAfterAFixTests", "RulesTests", "EnginesTests", "DefinitionTests"):
-            self.assertIn(f"\nclass {name}(", moved)
 
 
 if __name__ == "__main__":

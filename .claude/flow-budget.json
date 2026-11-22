@@ -1,5 +1,5 @@
 {
-  "code_lines": 7502,
+  "code_lines": 7553,
   "prompt_bytes": 99948,
-  "why": "2.20.2: +8 lines for the empty-ledger fix (status leaves no file, install accepts an empty one) and its note"
+  "why": "2.21.0 (issue 134): +51 lines for the stop gate's zone check (the test-author and QA held to the quality limits of their own files) and its note"
 }
