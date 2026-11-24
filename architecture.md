@@ -31,7 +31,7 @@ This release fixes the four, in both engines, which stay equivalent.
   - The next QA pass after a fix is a full call, never `kept`.
   - The run still ends `REVIEW` (the user's choice: QA did not validate).
 - **Issue 118, permissions.**
-  - `validate` rejects `powershell`/`pwsh` prefix rules (`:*`) that run code. A rule is safe only if a `-File`/`-f` comes before any `-Command`/`-EncodedCommand` flag. Bare `powershell`, `pwsh` and `cmd` join `OPEN_ENDED`.
+  - `validate` rejects `powershell`/`pwsh` prefix rules (`:*`) that run code. A rule is safe only if a `-File`/`-f` comes before any `-Command`/`-EncodedCommand` flag. Bare `powershell`, `pwsh` and `cmd` (one word, no arguments) are rejected too.
   - `sync-permissions` writes only the exact rule for a verify or acceptance command that runs PowerShell code, and removes the `:*` form it wrote before.
   - `validate` warns about such a command.
   - The PowerShell rules pack and `/architect` recommend a fixed runner script run with `-File`.
@@ -118,7 +118,7 @@ docs/how-to/README.md                   WP-04  the diff's N
 | `needs_item`/`needsItem` and `untestedItem`, the shape of a `needs validation` pending item (with `kind`, `claim`, `fact`, `how_to_check`) | `.claude/bin/pipeline.py:250-256`, `.claude/workflows/agentic-implement.js:283`, `.claude/workflows/agentic-implement.js:290-295` | `qa_not_run_items` builds the same shape | read |
 | `summarize` compares `detail`, `pending` types and `qa_passes` across engines | `.claude/bin/test_pipeline.py:154-171`, `.claude/bin/test_pipeline.py:211-222` | The new scenarios are checked by it with no change | read |
 | QA tests pin `qa_passes` modes for the existing scenarios | `.claude/bin/test_qa_recheck.py:57-116` | Must stay green: only an environment `BLOCKER` changes the mode | read |
-| `OPEN_ENDED`, `open_ended_rule` (a rule is open-ended when it is empty, has `*` in its prefix, or is one token in `OPEN_ENDED`) and `open_ended_command` | `.claude/bin/manifest_check.py:30-33`, `.claude/bin/manifest_check.py:39-43`, `.claude/bin/manifest_check.py:46-60` | `open_ended_rule` gains the PowerShell case; `open_ended_command` does not change | read |
+| `OPEN_ENDED`, `open_ended_rule` (a rule is open-ended when it is empty, has `*` in its prefix, or is one token in `OPEN_ENDED`) and `open_ended_command` | `.claude/bin/manifest_check.py:30-33`, `.claude/bin/manifest_check.py:39-43`, `.claude/bin/manifest_check.py:46-60` | `open_ended_rule` gains the PowerShell case. `open_ended_command` reads `OPEN_ENDED` (lines 54-58), which is why the new one-word shells go in a separate set and `OPEN_ENDED` does not change | read |
 | `command_errors` reports `allow_bash: rule too broad (…)`; `complexity_warnings` returns the warnings `validate` prints as `warning: …` | `.claude/bin/manifest_check.py:186-200`, `.claude/bin/manifest_check.py:78-97`, `.claude/bin/agentic.py:187-192` | The PowerShell warning is appended by `complexity_warnings` (its docstring widened), so `agentic.py` needs no change for it | read |
 | Tests of broad and specific rules, and of glob commands | `.claude/bin/test_agentic.py:206-214`, `.claude/bin/test_manifest_check.py:27-37` | Stay green | read |
 | `sync_permissions` adds `Bash(cmd)` and `Bash(cmd:*)` for the acceptance command and every verify command, never removes anything, and prints `N rule(s) added …` | `.claude/bin/installer.py:115-129` | PowerShell code commands get the exact rule only, and their `:*` form is removed | read |
@@ -180,13 +180,13 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 
 **`findings.split_by_owner(findings, owners, root) -> list`** (WP-02)
 - `findings` is one axis's confirmed list, each item with `fingerprint`. `owners` is `{wp: [files]}` (it may be `{}` or `None`). `root` is a string (it may be `""` or `None`).
-- **Text matched:** `evidence` + `"\n"` + `fix` (missing ones are `""`), with `\` replaced by `/` and, when `root` is non-empty, every `root + "/"` removed, compared case-insensitively (a Windows drive letter may differ in case).
+- **Text matched:** `evidence` + `"\n"` + `fix` (missing ones are `""`), with `\` replaced by `/` and, when `root` is non-empty, every `root + "/"` removed. Matching and root stripping compare ASCII-lowercased copies (only `A`-`Z` lowered, never Unicode case folding, and no `re.I`), so a drive letter of another case still matches. The output keeps every path exactly as written in `owners` or in the finding (normalised `\`→`/` and root removed, case untouched).
 - **Which files a package has in the text:** `mentioned(wp)` is that package's files that match like `attribute` (`.claude/bin/verification.py:286-287`), but with an ASCII word class so both engines agree. The pattern is `(?<![A-Za-z0-9_./-])` + escaped path + `(?![A-Za-z0-9_-])`, with no lookahead for a path ending in `/`. Python escapes with `re.escape`, JS with `s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`.
 - **A finding whose `wp` is not in `owners`** is treated the same: its own mentioned files are `[]`, and its `scope` holds only its normalised `file`.
 - **No other package named:** when no package other than the finding's `wp` has a mentioned file, the item is returned unchanged (the same object, no `scope`).
 - **Otherwise** the output holds, in this order:
   - the original, with `scope` = sorted unique (its own normalised `file`, which has the same replacements, plus `mentioned(its wp)`);
-  - then, for each other package with mentioned files, in ascending id order, a part with `wp`, `file` = `scope[0]`, `scope` = sorted `mentioned(wp)`, `split_from` = the original's fingerprint, no `line`, and `fingerprint` = `fingerprint(part)`. If that fingerprint is already in the output, it gets `-2`, `-3`, … as `with_fingerprints` does.
+  - then, for each other package with mentioned files, in ascending id order, a part with `wp`, `file` = `scope[0]`, `scope` = sorted `mentioned(wp)`, `split_from` = the original's fingerprint, no `line`, and `fingerprint` = `fingerprint(part)`. If that fingerprint is already taken, either by any item of the input list or by a part already produced, it gets `-2`, `-3`, … as `with_fingerprints` does.
 - Order is kept: each finding's group goes in its input position.
 - It never raises on non-string fields: they are treated as `""`.
 
@@ -196,7 +196,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 
 **`findings.qa_not_run_items(qa) -> list`** and **`findings.QA_NOT_RUN_DETAIL`** (WP-02)
 - Returns the items of section 5 when `qa_environment_blocked(qa)`, else `[]`.
-- Non-string entries of `not_run` are skipped, and repeats are kept once, in order.
+- Non-string entries of `not_run` are skipped, and repeats are kept once, in order. A `not_run` that is missing, not a list, or has no string entry gives the single default item.
 - The workflow mirrors it as `qaNotRunItems(qa)` and `QA_NOT_RUN_DETAIL` with the same text.
 
 **Engines** (WP-02, both, equivalent):
@@ -218,9 +218,9 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - A token is a *code flag* when it is `-c`, `-e` or `-ec`; or it has 3 or more characters and `-command` starts with it; or it has 4 or more characters and `-encodedcommand` starts with it.
 - **Answer.** True unless a file flag comes before every code flag. So no file flag means True.
 
-**`manifest_check.open_ended_rule(rule)`** (WP-03): as today, and also True when the rule ends with `:*` and `runs_code(shlex-split prefix)` is True. `OPEN_ENDED` gains `powershell`, `pwsh`, `powershell.exe`, `pwsh.exe`, `cmd` and `cmd.exe`.
+**`manifest_check.open_ended_rule(rule)`** (WP-03): as today, and also True when the rule ends with `:*` and `runs_code(shlex-split prefix)` is True. A new set `SHELLS_ALONE = {"powershell", "pwsh", "powershell.exe", "pwsh.exe", "cmd", "cmd.exe"}` makes a one-word rule open-ended, case-insensitively. It is used by `open_ended_rule` only: `OPEN_ENDED` does not change, so `open_ended_command` keeps its behaviour for verify commands.
 
-**`manifest_check.code_runner_commands(manifest) -> list`** (WP-03): the acceptance command and the verify commands (strings, in that order, without repeats) for which `runs_code` is True, with the words built as above.
+**`manifest_check.code_runner_commands(manifest) -> list`** (WP-03): the acceptance command and the verify commands (strings only: a missing or `None` acceptance or a non-dict `verify` is skipped; in that order, without repeats) for which `runs_code` is True, with the words built as above.
 
 **`manifest_check.complexity_warnings(manifest)`** (WP-03): also appends, per command of `code_runner_commands`, a warning that contains the command, `-File` and `.claude/rules-library/powershell.md`. Its exact text is free.
 
@@ -235,7 +235,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 - The project's own: English in code, comments and messages; standard library only; docstrings in the style of the surrounding module; no `print` debugging left.
 - **The two engines stay equivalent.** Every behaviour of WP-02 lands in `pipeline.py` and in `agentic-implement.js` with the same output, and `conformance.json` scenarios prove it (`test_pipeline.ConformanceTests`).
 - **The workflow script has no disk:** it cannot import `findings.py`. The JS mirrors are kept beside `fingerprint` (`.claude/workflows/agentic-implement.js:236-253`) and must give the same results.
-- **Quality ratchet:** no file or function may pass its allowance (4b's last row). A package may compact code of its own files to make room (for example one-line object literals in the workflow's schemas), without changing behaviour. `quality-baseline.json` is not edited.
+- **Quality ratchet:** no file or function may pass its allowance (4b's last row). A new file has no baseline entry, so none of its lines may exceed 120 characters: this holds for `test_fix_routing.py`, `test_fix_attempts.py`, `test_owner_split.py` and `test_code_runner_rules.py` (split long literals such as AC-008's Windows paths). A package may compact code of its own files to make room (for example one-line object literals in the workflow's schemas), without changing behaviour. `quality-baseline.json` is not edited.
 - **Errors:** `die()` for CLI misuse, with the existing message forms. The engines never raise on an agent's malformed report: they treat a missing field as absent.
 - **Commits:** imperative subject, `Fixes #NNN` lines in the body of the last commit of each package.
 
@@ -254,7 +254,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 - AC-002 · An attempt whose diff cannot be computed overwrites the file with a placeholder; `@N` needs `--fix`
   - Scenario: as AC-001, after `open-stage 1`, delete `.claude/state/tree-1.txt`.
   - Action: `close-stage 1 WP-02=done@1 --fix`; then, in a fresh stage, `close-stage 1 WP-02=done@1` (no `--fix`) and `close-stage 1 WP-02=done@0 --fix`.
-  - Expected: `runs/WP-02.fix-1.diff` is exactly `(the diff of this attempt could not be recorded)\n`. The two later calls exit 1, and their output contains `invalid entry`.
+  - Expected: `runs/WP-02.fix-1.diff` is exactly `(the diff of this attempt could not be recorded)\n`. The two later calls exit 1, and their stderr contains `invalid entry` (`die` prints there, `.claude/bin/core.py:192-196`).
   - Must not: `STALE` survive; an `@N` accepted without `--fix`.
   - Check: `test_fix_routing.py`.
   - WP: WP-01
@@ -395,14 +395,14 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - `.claude/bin/test_pipeline.py:405-414`: a test reading a named scenario's gates.
 - **Gotchas:**
   - **The split's place.** Split after verification, on the confirmed list only, so the verifier is called once per original finding (`agents` and `agent_calls` of existing scenarios unchanged).
-  - **Fingerprint collisions.** The fingerprint of a part is computed with its new `file`. Suffix collisions against everything already in that axis's output list.
+  - **Fingerprint collisions.** The fingerprint of a part is computed with its new `file`. Suffix collisions against every fingerprint of the input list and every part already produced.
   - **Normalising `file`.** The original's `file` can be absolute with backslashes (the real run: `C:\Users\…\XMM.RemoteServices.psm1`). Normalise it the same way as the text before putting it in `scope`.
   - **Missing plan keys.** `plan.owners`/`plan.root` are absent in every existing scenario's plan. Treat them as `{}`/`""`, so no split and no change to existing summaries.
   - **The prompt is the same text in both engines.** Python's `compact` and JS's `JSON.stringify` must see the same key order: build the part as `{...f, wp, file, scope, split_from, fingerprint}` in both, deleting `line`.
   - **The re-review sentence** goes into `pipeline-spec.json`'s `re_review` after `{diffs}`'s sentence and into the workflow's inline prompt at the same place (`.claude/workflows/agentic-implement.js:634-635`). The test of the prompt's head (`.claude/bin/test_workflow.mjs:602-611`) stays green.
   - **QA mode.** `full` when the standing report is environment-blocked: check it before the `kept` test.
   - **`detail`** is set only in the "nothing eligible" branch. A later `stop()` overrides it as today.
-  - **Room under the quality ratchet** (4b's last row). `pipeline.py` has 10 lines of room and `Pipeline.judge` 2: put the logic in `findings.py` and keep `judge`'s additions to calls of it. The workflow has 19 lines of room and no new line over 120 characters, and `runAfterPlan` has 2. Put `splitByOwner`, `qaEnvironmentBlocked`, `qaNotRunItems` and `QA_NOT_RUN_DETAIL` at top level next to `fingerprint`, and compact the workflow's own schema literals (`.claude/workflows/agentic-implement.js:25-170`) if room is short, keeping them deep-equal to the spec (`.claude/bin/test_workflow.mjs:587-600`).
+  - **Room under the quality ratchet** (4b's last row). `pipeline.py` has 10 lines of room and `Pipeline.judge` 2: put the logic in `findings.py` and keep `judge`'s additions to calls of it. The workflow has 19 lines of room and no new line over 120 characters, and `runAfterPlan` has 2. Put `splitByOwner`, `qaEnvironmentBlocked`, `qaNotRunItems` and `QA_NOT_RUN_DETAIL` at top level next to `fingerprint`, and compact the workflow's own schema literals (`.claude/workflows/agentic-implement.js:25-170`) if room is short (for example `type` and `required` on one line; every line at most 120 characters, since the file has 0 long lines of room), keeping them deep-equal to the spec (`.claude/bin/test_workflow.mjs:587-600`).
   - **Annex A's scenarios** are added to `conformance.json` verbatim. Their names are what the acceptance tests look up.
   - **Pinned gate strings.** Update `test_pipeline.py:414` to `close-stage 1 WP-01=blocker@1 --fix` and `test_workflow.mjs:186`/`:422` to `close-stage 1 WP-02=done@1 --fix`.
   - **`runAfterPlan` has 2 lines of room** and needs both the QA items in `baseline` and the `detail`. Make each a call of one top-level helper, or extend existing lines within 120 characters.
@@ -417,7 +417,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 #### WP-03 · No PowerShell rule runs arbitrary code, and the subset of a suite can be allowed
 - Wave: 1.
 - Files: `.claude/bin/manifest_check.py`, `.claude/bin/installer.py`, `.claude/rules-library/powershell.md`, `.claude/commands/architect.md`, `.claude/bin/test_code_runner_rules.py` (new).
-- Implements: `runs_code`, `open_ended_rule`'s PowerShell case, `OPEN_ENDED`'s additions, `code_runner_commands`, the warning in `complexity_warnings` and `sync_permissions`' change (section 6). Consumes nothing new.
+- Implements: `runs_code`, `open_ended_rule`'s PowerShell case, `SHELLS_ALONE`, `code_runner_commands`, the warning in `complexity_warnings` and `sync_permissions`' change (section 6). Consumes nothing new.
 - ACs: AC-008, AC-009, AC-010.
 - **Patterns to mirror:**
   - `.claude/bin/manifest_check.py:39-60`: how a rule's prefix is tokenised and judged.
@@ -449,10 +449,11 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - **QA's definition.** Explain when `blocker_kind` is `environment` (a command refused, a tool missing, the suite will not start for reasons outside the code) and when it is `design`, and that `not_run` lists the exact commands.
   - **Both reviewers' definitions.** Say "one finding per package": a breach that spans files owned by different packages is reported once per owning package, each with its own `wp` and `file`.
   - **`docs/how-it-works.md:392`** becomes "N is the attempt number in this run".
+  - **`docs/how-to/README.md` is at its cap of 260 lines** (`.claude/bin/test_field_fixes.py:389`, `qa/test_qa_docs.py:57`): extend line 204 in place and add no line.
   - **`flow-budget.json`:** raise only what is exceeded (run `python3 -m unittest discover -s .claude/bin -p test_lean.py`), with its why.
   - **`implement.md`** is pinned by `test_quality_limits.py` and `test_definitions.py` (`zone_suspects`, `gate_denials`). Extend the `qa_passes` line (59) and the status line (51); add no new line mentioning those.
   - **`.claude/flow-history.json`** is regenerated by the maintainer as the last commit, not by this package.
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`, `python3 .claude/bin/agentic.py quality`, `python3 -m unittest discover -s acceptance`.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`, `python3 .claude/bin/agentic.py quality`, `python3 -m unittest discover -s acceptance`, `python3 -m unittest discover -s qa`.
 
 ```json wp-manifest
 {
@@ -487,7 +488,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - `test_fix_attempts.py`: `@N` parsing, the ledger value and the placeholder.
   - `test_owner_split.py`: directories, root stripping (with a drive letter of another case), backslashes, ordering, collisions, a `wp` outside `owners`, non-string fields and the QA helpers, on the Python functions. The JS mirror is held equal through Annex A's scenarios in `ConformanceTests`.
   - `test_code_runner_rules.py`: a `runs_code` table (abbreviations, `/` flags, `.exe` and paths, the order of `-File` and `-Command`), `sync_permissions` idempotence.
-- **Conformance:** the four scenarios of Annex A, compared key by key by `ConformanceTests`.
+- **Conformance:** the three scenarios of Annex A, compared key by key by `ConformanceTests`.
 - **Teeth:** each behaviour is broken once by hand, and an acceptance test must fail:
   - the ledger + 1 used instead of `@N`;
   - no split in one engine;
@@ -523,6 +524,8 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 - **PowerShell's own parsing of abbreviations** is wider than the rule's (for example `-co` is ambiguous in `pwsh`). The rule errs toward rejecting. A legitimate rule that is rejected can always be rewritten with `-File`.
 - **Basenames in evidence.** A reviewer who quotes `x.py:3` for `src/b/x.py` does not trigger a split (whole-path matching, as `attribute`). The reviewers' definitions ask for paths, and the real run quoted root-level files by name, which are whole paths.
 - **Room under the quality ratchet** is tight in both engines (4b). WP-02 may need to compact its own schema literals.
+- **Wrapped commands are still open.** Two-word prefix rules such as `Bash(cmd /c x:*)` or `Bash(bash -c x:*)` are accepted today and stay accepted: issue 118 is closed for PowerShell only. A wider rule is a later design.
+- **`verify` does not run `acceptance/` or `qa/`.** A regression there shows only in the by-hand run before the pull request (section 9), as in earlier designs. WP-04 runs both in its validation.
 
 No question blocks a WP.
 
