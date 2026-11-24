@@ -6,7 +6,7 @@ The flow lives in your repo (`.claude/`), so where the repo is hosted does not m
 - **There is no "Use this template" across hosts.** Start from your own project and install the flow into it.
 - **The template's GitHub files are inert.** `.github/workflows/*` do nothing on GitLab. If you want the flow's tests in CI, add the GitLab job below.
 
-The flow itself still comes from GitHub: the plugin's marketplace is `jagosar/agentic-flow`, which is private, so the machine where you install needs read access to it (`gh auth login` and `gh auth setup-git`, or an SSH key on GitHub).
+The flow itself still comes from GitHub: the plugin's marketplace is `jagosar/agentic-ai-forge`, which is private, so the machine where you install needs read access to it (`gh auth login` and `gh auth setup-git`, or an SSH key on GitHub).
 
 ## A. A GitLab project without the flow
 

@@ -44,13 +44,13 @@ Not confirmed with real agents: the interactive interview in the UI, installing 
 **New project**, from the template:
 
 ```bash
-gh repo create my-project --template jagosar/agentic-flow --private --clone
+gh repo create my-project --template jagosar/agentic-ai-forge --private --clone
 ```
 
 **Existing project**, with the plugin. In a Claude Code session inside the repo:
 
 ```
-/plugin install agentic-flow --marketplace jagosar/agentic-flow
+/plugin install agentic-flow --marketplace jagosar/agentic-ai-forge
 ```
 
 ```

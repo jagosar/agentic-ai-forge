@@ -54,15 +54,15 @@ Line endings are not a problem: an upgrade recognises a flow file checked out wi
 **A new project**, from the template:
 
 ```bash
-gh repo create my-project --template jagosar/agentic-flow --private --clone
+gh repo create my-project --template jagosar/agentic-ai-forge --private --clone
 ```
 
-**An existing project, with the plugin (recommended).** In a Claude Code session inside the repo, run `/plugin install agentic-flow --marketplace jagosar/agentic-flow`, then `/agentic-flow:init`. [plugin.md](plugin.md) covers updates and what happens to your own changes.
+**An existing project, with the plugin (recommended).** In a Claude Code session inside the repo, run `/plugin install agentic-flow --marketplace jagosar/agentic-ai-forge`, then `/agentic-flow:init`. [plugin.md](plugin.md) covers updates and what happens to your own changes.
 
 **An existing project, by hand:**
 
 ```bash
-git clone --depth 1 https://github.com/jagosar/agentic-flow /tmp/agentic-flow
+git clone --depth 1 https://github.com/jagosar/agentic-ai-forge /tmp/agentic-flow
 ```
 
 ```bash

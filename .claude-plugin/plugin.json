@@ -8,8 +8,8 @@
     "name": "jagosar",
     "url": "https://github.com/jagosar"
   },
-  "homepage": "https://github.com/jagosar/agentic-flow",
-  "repository": "https://github.com/jagosar/agentic-flow",
+  "homepage": "https://github.com/jagosar/agentic-ai-forge",
+  "repository": "https://github.com/jagosar/agentic-ai-forge",
   "keywords": ["agents", "workflow", "architecture", "parallel", "guardrails", "tdd", "qa"],
   "commands": ["./plugin/commands/init.md"]
 }
