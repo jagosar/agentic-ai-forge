@@ -18,7 +18,7 @@ Uninstalling the plugin does not remove the flow from the repo.
 ## What you need
 
 - Claude Code 2.1.275 or later to install in one step; with older versions, use the two steps below.
-- Read access to `jagosar/agentic-flow`. It is a private repo cloned with git, so your git must be able to authenticate with GitHub (for example with `gh auth login` and `gh auth setup-git`).
+- Read access to `jagosar/agentic-ai-forge`. It is a private repo cloned with git, so your git must be able to authenticate with GitHub (for example with `gh auth login` and `gh auth setup-git`).
 - `python3` 3.9+ and `git`, like the rest of the flow.
 
 ## Install
@@ -26,13 +26,13 @@ Uninstalling the plugin does not remove the flow from the repo.
 In a Claude Code session inside your repo:
 
 ```
-/plugin install agentic-flow --marketplace jagosar/agentic-flow
+/plugin install agentic-flow --marketplace jagosar/agentic-ai-forge
 ```
 
 Or in two steps, which also work from a terminal:
 
 ```bash
-claude plugin marketplace add jagosar/agentic-flow
+claude plugin marketplace add jagosar/agentic-ai-forge
 ```
 
 ```bash

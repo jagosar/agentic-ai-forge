@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   bench:
-    if: github.repository == 'jagosar/agentic-flow'
+    if: github.repository == 'jagosar/agentic-ai-forge'
     runs-on: ubuntu-latest
     # 6 runs of up to 60 minutes, plus setup.
     timeout-minutes: 420
