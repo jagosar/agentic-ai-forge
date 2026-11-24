@@ -396,7 +396,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 - **Gotchas:**
   - **The split's place.** Split after verification, on the confirmed list only, so the verifier is called once per original finding (`agents` and `agent_calls` of existing scenarios unchanged).
   - **Fingerprint collisions.** The fingerprint of a part is computed with its new `file`. Suffix collisions against every fingerprint of the input list and every part already produced.
-  - **Normalising `file`.** The original's `file` can be absolute with backslashes (the real run: `C:\Users\…\XMM.RemoteServices.psm1`). Normalise it the same way as the text before putting it in `scope`.
+  - **Normalising `file`.** The original's `file` can be absolute with backslashes (the real run: `C:\…\XMM.RemoteServices.psm1`). Normalise it the same way as the text before putting it in `scope`.
   - **Missing plan keys.** `plan.owners`/`plan.root` are absent in every existing scenario's plan. Treat them as `{}`/`""`, so no split and no change to existing summaries.
   - **The prompt is the same text in both engines.** Python's `compact` and JS's `JSON.stringify` must see the same key order: build the part as `{...f, wp, file, scope, split_from, fingerprint}` in both, deleting `line`.
   - **The re-review sentence** goes into `pipeline-spec.json`'s `re_review` after `{diffs}`'s sentence and into the workflow's inline prompt at the same place (`.claude/workflows/agentic-implement.js:634-635`). The test of the prompt's head (`.claude/bin/test_workflow.mjs:602-611`) stays green.
