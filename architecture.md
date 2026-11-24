@@ -85,6 +85,7 @@ docs/how-to/README.md                   WP-04  the diff's N
 .claude/bin/upgrade.py                  WP-04  NOTES["2.21.2"]
 .claude/flow-budget.json                WP-04
 .claude/bin/test_acceptance_v221.py     WP-04  its version pin: 2.21.2
+.claude/bin/test_failure_evidence.py    WP-04  its two version pins (lines 225, 241): 2.21.2
 .claude/bin/test_fix_routing.py         AT
 .claude/flow-history.json               by hand: regenerated as the last commit
 ```
@@ -127,7 +128,12 @@ docs/how-to/README.md                   WP-04  the diff's N
 | QA's `status` line; the standards reviewer's "one finding per rule and file"; the reviewer's report line | `.claude/agents/qa.md:67`, `.claude/agents/standards-reviewer.md:27`, `.claude/agents/reviewer.md:107` | Lines to extend | read |
 | The guide's lines on fix diffs and statuses; the how-to's diff line; `/implement`'s `detail` and `qa_passes` lines | `docs/how-it-works.md:155`, `docs/how-it-works.md:366`, `docs/how-it-works.md:392`, `docs/how-to/README.md:204`, `.claude/commands/implement.md:51`, `.claude/commands/implement.md:59` | Lines to extend | read |
 | The release pattern of a fix: `NOTES["2.21.1"]` right above `"2.21.0"`; the minor release's test pins the version | `.claude/bin/upgrade.py:156-163`, `.claude/bin/test_acceptance_v221.py:138-145` | `NOTES["2.21.2"]` right above `"2.21.1"`; pin `2.21.2` | read |
-| `test_lean.py` holds the flow's size to `flow-budget.json` (5 % slack below) | `.claude/bin/test_lean.py:24-25`, `.claude/bin/test_lean.py:57-70` | Raise what is exceeded, with its why | read |
+| The 2.21.1 acceptance file pins the version: `plugin["version"] == "2.21.1"` and `'"2.21.1"'` in `test_acceptance_v221.py`; its other checks (`NOTES["2.21.1"]` right above `"2.21.0"`, `2.21.1` absent from the guide) stay true | `.claude/bin/test_failure_evidence.py:222-242` (the pins at 225 and 241) | WP-04 changes only those two pins to `2.21.2` | read |
+| `test_lean.py` holds the flow's size to `flow-budget.json` (5 % slack below); `test_the_flow_stays_within_its_budget` runs in every package's validation | `.claude/bin/test_lean.py:24-25`, `.claude/bin/test_lean.py:57-70`, `.claude/bin/test_lean.py:138` | Raise what is exceeded, with its why (WP-04). In wave 1 it is expected to fail | read |
+| `shlex.split` reads an unquoted `\` as an escape: `C:\Windows\x\powershell.exe -Command x` gives `C:Windowsxpowershell.exe` | measured with `python3 -c "import shlex; …"` in this session | Replace `\` by `/` before splitting (a measured behaviour of the standard library, not repo code) | inferred |
+| `close-stage`'s usage text is in Spanish (`ID=estado`, `Uso:`) | `.claude/bin/agentic.py:14`, `.claude/bin/agentic.py:219` | WP-01 writes it in English (`ID=state[@N]`, `Usage:`) | read |
+| The rules packs' tables must keep the rows `build`, `types`, `lint`, `tests` in that order | `.claude/bin/test_definitions.py:318-328` | `powershell.md` keeps the four rows | read |
+| `raw_run(decl)` runs a scenario in the fallback engine and returns the raw result (with full `pending` items) | `.claude/bin/test_pipeline.py:336` | AC-006 reads pending items through it | read |
 | The quality ratchet: a file at or under 800 lines may grow to 800; a function's allowance is 60 lines or its stored value; no new line over 120 characters in a file at its stored count | `.claude/bin/quality.py:225-243`, `.claude/quality-baseline.json` | Measured now: `pipeline.py` 790 lines (allowed 800), 26 long (allowed 29); `agentic-implement.js` 842 (allowed 861), 64 long (allowed 64); `Pipeline.judge` 71 (allowed 73); `runAfterPlan` 126 (allowed 128) | read |
 
 What must not change: a `close-stage` without `@N`; the readers' diff names; `attribute`; the fingerprint formula; the verify phases; `open_ended_command`; the `reports` path; QA `kept` mode for any report that is not an environment `BLOCKER`; a finding whose evidence names no other package's file (the same object, no `scope`).
@@ -174,8 +180,9 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 
 **`findings.split_by_owner(findings, owners, root) -> list`** (WP-02)
 - `findings` is one axis's confirmed list, each item with `fingerprint`. `owners` is `{wp: [files]}` (it may be `{}` or `None`). `root` is a string (it may be `""` or `None`).
-- **Text matched:** `evidence` + `"\n"` + `fix` (missing ones are `""`), with `\` replaced by `/` and, when `root` is non-empty, every `root + "/"` removed.
-- **Which files a package has in the text:** `mentioned(wp)` is that package's files that match like `attribute` (`.claude/bin/verification.py:286-287`).
+- **Text matched:** `evidence` + `"\n"` + `fix` (missing ones are `""`), with `\` replaced by `/` and, when `root` is non-empty, every `root + "/"` removed, compared case-insensitively (a Windows drive letter may differ in case).
+- **Which files a package has in the text:** `mentioned(wp)` is that package's files that match like `attribute` (`.claude/bin/verification.py:286-287`), but with an ASCII word class so both engines agree. The pattern is `(?<![A-Za-z0-9_./-])` + escaped path + `(?![A-Za-z0-9_-])`, with no lookahead for a path ending in `/`. Python escapes with `re.escape`, JS with `s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`.
+- **A finding whose `wp` is not in `owners`** is treated the same: its own mentioned files are `[]`, and its `scope` holds only its normalised `file`.
 - **No other package named:** when no package other than the finding's `wp` has a mentioned file, the item is returned unchanged (the same object, no `scope`).
 - **Otherwise** the output holds, in this order:
   - the original, with `scope` = sorted unique (its own normalised `file`, which has the same replacements, plus `mentioned(its wp)`);
@@ -204,7 +211,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 **Spec** (WP-02): `schemas.qa.properties` gains `blocker_kind` (`{"type": "string", "enum": ["environment", "design"]}`) and `not_run` (`{"type": "array", "items": {"type": "string"}}`). `required` is unchanged, and the workflow's `QA_SCHEMA` copy is the same.
 
 **`manifest_check.runs_code(tokens) -> bool`** (WP-03)
-- `tokens` is a list of words (shlex-split).
+- `tokens` is a list of words. Every caller builds it as `shlex.split(text.replace("\\", "/"))`, falling back to `text.replace("\\", "/").split()` on `ValueError`. Splitting without that replacement would glue a Windows path into one word with no separators (4b).
 - **Program.** The program is `tokens[0]` after its last `/` or `\`, lowercased, with a final `.exe` removed. When it is not `powershell` or `pwsh`, the answer is False.
 - **Flags.** Each later token is lowercased, and a leading `/` reads as `-`.
   - A token is a *file flag* when it is `-f` or `-file`.
@@ -213,7 +220,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 
 **`manifest_check.open_ended_rule(rule)`** (WP-03): as today, and also True when the rule ends with `:*` and `runs_code(shlex-split prefix)` is True. `OPEN_ENDED` gains `powershell`, `pwsh`, `powershell.exe`, `pwsh.exe`, `cmd` and `cmd.exe`.
 
-**`manifest_check.code_runner_commands(manifest) -> list`** (WP-03): the acceptance command and the verify commands (strings, in that order, without repeats) for which `runs_code(shlex.split(cmd))` is True. On a `ValueError`, it uses `cmd.split()`.
+**`manifest_check.code_runner_commands(manifest) -> list`** (WP-03): the acceptance command and the verify commands (strings, in that order, without repeats) for which `runs_code` is True, with the words built as above.
 
 **`manifest_check.complexity_warnings(manifest)`** (WP-03): also appends, per command of `code_runner_commands`, a warning that contains the command, `-File` and `.claude/rules-library/powershell.md`. Its exact text is free.
 
@@ -293,7 +300,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - Action: run it in both engines.
   - Expected:
     - Both engines give `result` `REVIEW`, `fix_cycles` 0 and `detail` exactly `QA_NOT_RUN_DETAIL`, and the summaries are equal.
-    - The raw result's `pending` holds an item with `kind` `qa not run`, `claim` `powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1` and `how_to_check` `run powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1`.
+    - The raw result's `pending`, from `test_pipeline.raw_run` (the summaries hold only pending types, so this field check is on the fallback engine; the workflow's equality comes from the summaries), holds an item with `kind` `qa not run`, `claim` `powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1` and `how_to_check` `run powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1`.
     - With `blocker_kind` `design` (a variant built in the test), `detail` is `None` and no `qa not run` item exists.
   - Must not: `detail` `None` in the environment case; a `qa not run` item from a `FAIL` or `PASS` report.
   - Check: `test_fix_routing.py`.
@@ -335,7 +342,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - Action: `agentic.py validate`; read the two files.
   - Expected:
     - `validate` exits 0, and one stdout line starts with `warning:` and contains `Invoke-Pester -EnableExit`, `-File` and `powershell.md`.
-    - `powershell.md` contains `-File build/Invoke-Tests.ps1` and `Bash(powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1:*)`, and does not contain `-Command "Invoke-Pester`.
+    - `powershell.md` contains `-File build/Invoke-Tests.ps1` and `Bash(powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1:*)`, and contains no `-Command "Invoke-` (neither Pester nor ScriptAnalyzer). Its table keeps the rows `build`, `types`, `lint`, `tests`.
     - `architect.md`'s line that starts with ``- **`allow_bash`:**`` contains `-File`.
   - Must not: the warning for a command without PowerShell.
   - Check: `test_fix_routing.py`.
@@ -345,7 +352,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - Scenario: the repository's files.
   - Action: read them.
   - Expected:
-    - **Release.** `plugin.json` version is `2.21.2`. `upgrade.NOTES["2.21.2"]` is the key right above `"2.21.1"`, with a note containing `@N`, one containing `scope`, one containing `qa not run` and one containing `-File`. `test_acceptance_v221.py` pins `2.21.2`.
+    - **Release.** `plugin.json` version is `2.21.2`. `upgrade.NOTES["2.21.2"]` is the key right above `"2.21.1"`, with a note containing `@N`, one containing `scope`, one containing `qa not run` and one containing `-File`. `test_acceptance_v221.py` and `test_failure_evidence.py` pin `2.21.2`.
     - **Agents' definitions.** `.claude/agents/qa.md` contains `blocker_kind` and `not_run`. `.claude/agents/reviewer.md` and `.claude/agents/standards-reviewer.md` each contain `one finding per package`.
     - **Docs.** `docs/how-it-works.md` contains `scope`, `blocker_kind` and `qa not run`. Its line that starts `- **Fix attempt:**` contains `in this run`. The line of `implement.md` that contains `` `qa_passes` `` also contains `environment`.
   - Must not: `2.21.2` anywhere in `docs/how-it-works.md`.
@@ -369,6 +376,8 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - `@N` without `--fix`, a non-integer or N < 1 is an invalid entry (exit 1, from `die`).
   - `test_agentic.py:485-490` still expects `fix_count` 2 after two closes without `@N`.
   - The placeholder is written only for a package with files (as today's loop).
+  - The usage text at `agentic.py:14` and `:219` is rewritten in English: `close-stage L ID=state[@N]... [--expect red|green] [--fix]`, and `Usage:` in the `die`.
+  - **Expected failure in wave 1:** `test_lean.test_the_flow_stays_within_its_budget` may fail because the code grew. WP-04 raises the budget in wave 2. Report it in `not_checked`, not as `BLOCKED`. Every other test must pass.
 - **Exact imports and APIs:** `ledger_read`, `ledger_update`, `stage_of`, `entities`, `LEDGER_STATES`, `wps`, `STATE`, `ROOT` already imported in `stage.py`. `git_tree()` at `.claude/bin/stage.py:65`.
 - **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`, `python3 .claude/bin/agentic.py quality`.
 
@@ -396,6 +405,9 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - **Room under the quality ratchet** (4b's last row). `pipeline.py` has 10 lines of room and `Pipeline.judge` 2: put the logic in `findings.py` and keep `judge`'s additions to calls of it. The workflow has 19 lines of room and no new line over 120 characters, and `runAfterPlan` has 2. Put `splitByOwner`, `qaEnvironmentBlocked`, `qaNotRunItems` and `QA_NOT_RUN_DETAIL` at top level next to `fingerprint`, and compact the workflow's own schema literals (`.claude/workflows/agentic-implement.js:25-170`) if room is short, keeping them deep-equal to the spec (`.claude/bin/test_workflow.mjs:587-600`).
   - **Annex A's scenarios** are added to `conformance.json` verbatim. Their names are what the acceptance tests look up.
   - **Pinned gate strings.** Update `test_pipeline.py:414` to `close-stage 1 WP-01=blocker@1 --fix` and `test_workflow.mjs:186`/`:422` to `close-stage 1 WP-02=done@1 --fix`.
+  - **`runAfterPlan` has 2 lines of room** and needs both the QA items in `baseline` and the `detail`. Make each a call of one top-level helper, or extend existing lines within 120 characters.
+  - **The JS mirror is tested** through Annex A's scenarios (compared with Python by `ConformanceTests`) and, if wanted, extra `simulate()` cases in `test_workflow.mjs`. The workflow is one async body, so its functions cannot be imported by another script. `test_owner_split.py` tests the Python functions only.
+  - **Expected failure in wave 1:** `test_lean.test_the_flow_stays_within_its_budget` may fail because the code grew. WP-04 raises the budget in wave 2. Report it in `not_checked`, not as `BLOCKED`. Every other test must pass.
 - **Exact imports and APIs:**
   - `from findings import blocks, text_sum, waiver_for, with_fingerprints` plus the new names (`.claude/bin/pipeline.py:19`); `findings.fingerprint`.
   - `launch.py` already has `wps`, `ROOT` (`from core import …`).
@@ -413,7 +425,9 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - `.claude/bin/installer.py:115-129`: the settings file's read/modify/write and its print.
   - `.claude/bin/test_manifest_check.py:27-37`: a table of commands with `subTest`.
 - **Gotchas:**
-  - **Tokenising.** `open_ended_rule` today splits on spaces. Use `shlex.split` for `runs_code` (falling back to `.split()` on `ValueError`), so a quoted Windows path stays one token.
+  - **Tokenising.** `open_ended_rule` today splits on spaces. For `runs_code`, replace `\` by `/` first, then `shlex.split` (falling back to `.split()` on `ValueError`), so `C:\…\powershell.exe` keeps its separators and a quoted argument stays one token (4b).
+  - **The lint row too.** `powershell.md`'s lint row also moves to a runner with `-File` (for example `build/Invoke-Lint.ps1`). The table keeps its four rows (`.claude/bin/test_definitions.py:318-328`).
+  - **Expected failure in wave 1:** `test_lean.test_the_flow_stays_within_its_budget` may fail because the code and prompt bytes grew. WP-04 raises the budget in wave 2. Report it in `not_checked`, not as `BLOCKED`. Every other test must pass.
   - **Order of flags.** A `-Command` before `-File` runs code: `-File`'s script receives nothing.
   - **Where `code_runner_commands` lives.** It belongs in `manifest_check.py`, and `installer.py` imports it the way it imports from `core` (check `installer.py`'s import list at the top: add `from manifest_check import code_runner_commands`). Running `python3 .claude/bin/agentic.py sync-permissions` must keep working, so check there is no import cycle.
   - **The runner script in `powershell.md`** is an example the project writes in its own repo. Show it whole, under 15 lines: `param([string[]]$Path = '.')`, then `Invoke-Pester -Path $Path -EnableExit -OutputFile test-results.xml -OutputFormat NUnitXml`. Show the verify line and the `allow_bash` rule for it, and say why `-Command` is exact-only. Pester 3.4 and 5 accept `-Path`, `-EnableExit` and `-OutputFormat NUnitXml` in their legacy parameter set (not measured here: section 11).
@@ -423,7 +437,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
 
 #### WP-04 · Docs, agents' definitions and release 2.21.2
 - Wave: 2, depends on WP-01, WP-02 and WP-03. `flow-budget.json` measures the code the other packages wrote, and the docs describe it as built.
-- Files: `docs/how-it-works.md`, `docs/how-to/README.md`, `.claude/commands/implement.md`, `.claude/agents/qa.md`, `.claude/agents/reviewer.md`, `.claude/agents/standards-reviewer.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v221.py`.
+- Files: `docs/how-it-works.md`, `docs/how-to/README.md`, `.claude/commands/implement.md`, `.claude/agents/qa.md`, `.claude/agents/reviewer.md`, `.claude/agents/standards-reviewer.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v221.py`, `.claude/bin/test_failure_evidence.py` (its two version pins only, lines 225 and 241).
 - Implements: nothing callable. Consumes every contract of section 6 by implementation.
 - ACs: AC-011.
 - **Patterns to mirror:**
@@ -455,7 +469,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
      "acs": ["AC-003", "AC-004", "AC-005", "AC-006", "AC-007"], "mirror": [".claude/bin/verification.py:277-295", ".claude/bin/findings.py:70-94", ".claude/workflows/agentic-implement.js:236-253", ".claude/bin/pipeline.py:567-609", ".claude/workflows/agentic-implement.js:568-616", ".claude/bin/pipeline.py:656-678", ".claude/workflows/agentic-implement.js:688-712", ".claude/bin/test_pipeline.py:405-414"]},
     {"id": "WP-03", "wave": 1, "depends_on": [], "files": [".claude/bin/manifest_check.py", ".claude/bin/installer.py", ".claude/rules-library/powershell.md", ".claude/commands/architect.md", ".claude/bin/test_code_runner_rules.py"],
      "acs": ["AC-008", "AC-009", "AC-010"], "mirror": [".claude/bin/manifest_check.py:39-60", ".claude/bin/manifest_check.py:78-97", ".claude/bin/installer.py:115-129", ".claude/bin/test_manifest_check.py:27-37"]},
-    {"id": "WP-04", "wave": 2, "depends_on": ["WP-01", "WP-02", "WP-03"], "files": ["docs/how-it-works.md", "docs/how-to/README.md", ".claude/commands/implement.md", ".claude/agents/qa.md", ".claude/agents/reviewer.md", ".claude/agents/standards-reviewer.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v221.py"],
+    {"id": "WP-04", "wave": 2, "depends_on": ["WP-01", "WP-02", "WP-03"], "files": ["docs/how-it-works.md", "docs/how-to/README.md", ".claude/commands/implement.md", ".claude/agents/qa.md", ".claude/agents/reviewer.md", ".claude/agents/standards-reviewer.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v221.py", ".claude/bin/test_failure_evidence.py"],
      "acs": ["AC-011"], "mirror": [".claude/bin/upgrade.py:156-163", ".claude/bin/test_acceptance_v221.py:138-145", "docs/how-it-works.md:392", ".claude/agents/qa.md:67"]}
   ]
 }
@@ -471,7 +485,7 @@ QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see t
   - Nothing is spent.
 - **Unit tests:**
   - `test_fix_attempts.py`: `@N` parsing, the ledger value and the placeholder.
-  - `test_owner_split.py`: directories, root stripping, backslashes, ordering, collisions, non-string fields and the QA helpers. It also checks that the JS mirror gives the same output on the same table, by running `node` on a small script that loads the workflow's functions the way `test_workflow.mjs` does, or by adding the cases to `test_workflow.mjs`.
+  - `test_owner_split.py`: directories, root stripping (with a drive letter of another case), backslashes, ordering, collisions, a `wp` outside `owners`, non-string fields and the QA helpers, on the Python functions. The JS mirror is held equal through Annex A's scenarios in `ConformanceTests`.
   - `test_code_runner_rules.py`: a `runs_code` table (abbreviations, `/` flags, `.exe` and paths, the order of `-File` and `-Command`), `sync_permissions` idempotence.
 - **Conformance:** the four scenarios of Annex A, compared key by key by `ConformanceTests`.
 - **Teeth:** each behaviour is broken once by hand, and an acceptance test must fail:
