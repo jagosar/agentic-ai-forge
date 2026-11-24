@@ -1,5 +1,5 @@
 {
-  "code_lines": 7627,
-  "prompt_bytes": 100047,
-  "why": "2.21.1 (design 0030): +74 code lines for Pester headers read only above a failure, failing_lines as a fix's evidence in both engines and the zone gate's denials in the run's record; +99 prompt bytes for /implement's gate_denials line"
+  "code_lines": 7801,
+  "prompt_bytes": 102412,
+  "why": "2.21.2 (design 0031): +174 code lines for the fix attempt number in close-stage and both engines, the split of findings by owner (findings.py and its workflow mirror), QA blocked by the environment as pending, and the PowerShell code rules; +2365 prompt bytes for the PowerShell runner-script guidance, /architect's allow_bash line, QA's blocker_kind and not_run, both reviewers' one finding per package and /implement's detail and qa_passes lines"
 }
