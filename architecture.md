@@ -1,349 +1,539 @@
-# Architecture: a failure reaches the package that can fix it, with its failing lines (agentic-flow 2.21.1)
+# Architecture: fixes go where they belong, QA that could not run says so, and no PowerShell rule runs arbitrary code (issues 140, 141, 142, 118; agentic-flow 2.21.2)
 Type: fix · Size: standard
 
 ## 1. Goal
 
-A real run of a PowerShell project (`wf_15d1d178-538`, ended REVIEW at "fix wave 1" with 11 gate denials) showed three defects of the flow. First, without a test report, `verify` and the stop gate read the console minus the lines of passing tests, so Pester's `Describing AC-6xx` and `Context` headers of passing tests were kept, and `attribute` sent three packages to fix criteria whose tests passed. Second, the fix's `evidence` is built from the phase's `tail` (its last 8 lines): the regression's own `new_failures` (`[-] XMM-Panel.ps1 has UTF-8 BOM, CRLF only and no non-ASCII`) never reached the package, and a failing acceptance phase carries no lines at all. Third, the denials of the zone stop gate (test-author and QA, design 0029) are not in the run's record, so nobody can tell whether it acted. This release fixes the three, in both engines, which stay equivalent.
+A real run of a PowerShell project (result `REVIEW`, `fix_cycles: 2`, QA `BLOCKER` three times with 0 defects) showed four defects of the flow.
+
+- **Issue 140.** A fix attempt's diff `runs/<WP>.fix-<N>.diff` is named from the ledger's `fix_count`, which is never reset between runs. The engines read it by their own in-run counter, which starts at 0. So agents read diffs left by earlier runs.
+- **Issue 141.** A finding whose evidence names files of several packages goes to one package. The fix prompt forbids it to touch the others' files, and the re-review can only say ADDRESSED or NOT_ADDRESSED. So the finding burns every fix cycle.
+- **Issue 142.** When the environment refused QA's commands, QA's `BLOCKER` is read as a verdict on the code. A `kept` QA pass then replays that stale report.
+- **Issue 118.** `sync-permissions` allows a verify command only as its whole line. An agent that runs a subset of the tests matches no rule, and auto mode refuses it. Also, a `powershell … -Command X:*` rule lets an agent run any PowerShell code, and `validate` does not see it.
+
+This release fixes the four, in both engines, which stay equivalent.
 
 ## 2. Scope
 
 ### Included
 
-- **Pester headers (bug 1).** In the console fallback of `scan_lines` (no `reports` declared, or a report that cannot be read), a `Describing`/`Context` header line is kept only when a failing line follows it inside its block. A header of passing tests no longer names a package. The `reports` path does not change.
-- **Failing lines as evidence (bug 2).** `verify` adds `failing_lines` to every phase that blocks (status `regression` or `fails`), the acceptance phase included. Both engines build each failing phase's evidence from `new_failures`, else `failing_lines`, else `tail`.
-- **Zone denials in the record (bug 3).** `close-stage` adds `AT=n` / `QA=n` to its `GATE:` line when that zone was refused at least once; both engines read them, after wave 0 and after QA, into `gate_denials`.
-- **Docs and release 2.21.1.** The guide's lines, `/implement`'s presentation of `gate_denials`, the notes, the budget, the version pin of `test_acceptance_v221.py`, and one acceptance file.
+- **Issue 140, fix-attempt numbering.**
+  - `close-stage` accepts `ID=state@N` with `--fix`. N becomes the diff's number and the ledger's `fix_count`.
+  - Both engines send their in-run attempt number.
+  - An attempt whose diff cannot be computed writes a placeholder, so no stale file survives under that number.
+- **Issue 141, findings split by owner.**
+  - After verification, every confirmed review finding (both axes) whose `evidence` or `fix` names files that other packages own is split into one finding per owning package. Each part carries `scope`, the files it is judged in.
+  - `pipeline-plan` gives the engines each package's files (`owners`) and the repo root (`root`).
+  - The re-review prompt says a finding with a `scope` is judged only in those files.
+  - The reviewers' definitions ask for one finding per owning package.
+- **Issue 142, QA blocked by the environment.**
+  - The QA schema gains two optional fields, `blocker_kind` (`environment` | `design`) and `not_run` (the commands QA could not run).
+  - An environment `BLOCKER` becomes one `needs validation` pending item per command, of kind `qa not run`. The run's `detail` says QA did not run.
+  - The next QA pass after a fix is a full call, never `kept`.
+  - The run still ends `REVIEW` (the user's choice: QA did not validate).
+- **Issue 118, permissions.**
+  - `validate` rejects `powershell`/`pwsh` prefix rules (`:*`) that run code. A rule is safe only if a `-File`/`-f` comes before any `-Command`/`-EncodedCommand` flag. Bare `powershell`, `pwsh` and `cmd` join `OPEN_ENDED`.
+  - `sync-permissions` writes only the exact rule for a verify or acceptance command that runs PowerShell code, and removes the `:*` form it wrote before.
+  - `validate` warns about such a command.
+  - The PowerShell rules pack and `/architect` recommend a fixed runner script run with `-File`.
+- **Docs and release 2.21.2.** The guide, `/implement`'s presentation, the agents' definitions (QA, both reviewers), the notes, the budget and the pin in `test_acceptance_v221.py`.
 
 ### Excluded (non-goals)
 
-- The project's own plan (its `reports` with Pester's NUnitXml, the missed test `FeatureFlagList AC-001` in its 4b): a note to the user, not this flow.
-- What the stop gate shows a package: `own_failure` keeps returning the lines that name the package's markers (section 11).
-- `verification_failures` in the result keeps `tail` as today.
-- `qa_passes`: it was `[]` in that run because the run stopped before QA. Expected, not a bug.
-- Any agent definition, prompt template or schema.
+- **QA defects that span packages.** The split applies to review findings only, which is what the run showed. QA's `defects` keep their `wp`.
+- **New findings of a re-review.** They are still recorded and never fixed in the run.
+- **The manual commands' counting** (`run-wave --fix` increments the ledger's `fix_count` as its cap, `.claude/bin/launch.py:419-427`). `close-stage` without `@N` behaves exactly as today.
+- **Resetting the ledger or deleting old diffs at the start of a run.** The explicit number makes them harmless (section 10).
+- **Whether auto mode's classifier honours allow rules.** Not reproducible here (section 11). The design makes the rules match what the agents run.
+- **The PowerShell project's own fixes** (its manifest, its `$ExitUnreachable` copies). They belong to the user.
 
 ## 3. Stack
 
-Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workflow.mjs`. No package manager, no new dependency.
+Python 3.9+ (standard library only), and the Node.js the CI uses for `test_workflow.mjs`. No package manager, no new dependency.
 
-- Unit and acceptance: `python3 -m unittest discover -s .claude/bin -p "test_*.py"`
-- The workflow against the conformance scenarios: `node .claude/bin/test_workflow.mjs`
-- Quality limits: `python3 .claude/bin/agentic.py quality`
-- Bench: `python3 -m unittest discover -s bench -p "test_*.py"` and `python3 -m unittest discover -s bench/acceptance`
+- **Unit and acceptance:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`
+- **The workflow against the conformance scenarios:** `node .claude/bin/test_workflow.mjs`
+- **Quality limits:** `python3 .claude/bin/agentic.py quality`
+- **Bench:** `python3 -m unittest discover -s bench -p "test_*.py"` and `python3 -m unittest discover -s bench/acceptance`
 
 ## 4. Repository structure
 
 ```
-.claude/bin/verification.py            WP-01  Pester headers in the console fallback; failing_lines in verify
-.claude/bin/stage.py                   WP-01  AT=n / QA=n in close-stage's GATE line
-.claude/bin/test_failure_lines.py      WP-01  new: unit cases
-.claude/bin/pipeline.py                WP-02  evidence from the failing lines; zone denials summed
-.claude/workflows/agentic-implement.js WP-02  the same, in the native engine
-.claude/bin/conformance.json           WP-02  three new scenarios
-.claude/bin/test_pipeline.py           WP-02  EngineTests: what the new scenarios end with
-docs/how-it-works.md                   WP-03  the stop gate's and the failed verifications' lines
-.claude/commands/implement.md          WP-03  the gate_denials line
-.claude-plugin/plugin.json             WP-03  2.21.1
-.claude/bin/upgrade.py                 WP-03  NOTES["2.21.1"]
-.claude/flow-budget.json               WP-03
-.claude/bin/test_acceptance_v221.py    WP-03  its version pin: 2.21.1
-.claude/bin/test_failure_evidence.py   AT
-.claude/flow-history.json              by hand: regenerated as the last commit
+.claude/bin/stage.py                    WP-01  close-stage: ID=state@N with --fix; placeholder diff
+.claude/bin/agentic.py                  WP-01  close-stage's usage text only
+.claude/bin/test_fix_attempts.py        WP-01  new: unit cases
+.claude/bin/findings.py                 WP-02  split_by_owner, qa_environment_blocked, qa_not_run_items, QA_NOT_RUN_DETAIL
+.claude/bin/pipeline.py                 WP-02  @N in fix closes, split after verification, QA environment blocker, no kept replay
+.claude/workflows/agentic-implement.js  WP-02  the same, in the native engine
+.claude/workflows/pipeline-spec.json    WP-02  QA schema fields; re_review prompt sentence
+.claude/bin/launch.py                   WP-02  pipeline_plan: owners and root
+.claude/bin/conformance.json            WP-02  three new scenarios (Annex A)
+.claude/bin/test_pipeline.py            WP-02  the pinned --fix gate string
+.claude/bin/test_workflow.mjs           WP-02  the pinned --fix gate strings
+.claude/bin/test_owner_split.py         WP-02  new: unit cases of split_by_owner and the QA helpers
+.claude/bin/manifest_check.py           WP-03  runs_code, open_ended_rule, OPEN_ENDED, code_runner_commands, the warning
+.claude/bin/installer.py                WP-03  sync_permissions: exact rule only, removes the old :* form
+.claude/rules-library/powershell.md     WP-03  runner script with -File; allow_bash example
+.claude/commands/architect.md           WP-03  the allow_bash bullet
+.claude/bin/test_code_runner_rules.py   WP-03  new: unit cases
+docs/how-it-works.md                    WP-04  diffs, split, QA environment blocker, PowerShell rules
+docs/how-to/README.md                   WP-04  the diff's N
+.claude/commands/implement.md           WP-04  detail and qa not run; qa_passes
+.claude/agents/qa.md                    WP-04  blocker_kind and not_run
+.claude/agents/reviewer.md              WP-04  one finding per owning package
+.claude/agents/standards-reviewer.md    WP-04  one finding per owning package
+.claude-plugin/plugin.json              WP-04  2.21.2
+.claude/bin/upgrade.py                  WP-04  NOTES["2.21.2"]
+.claude/flow-budget.json                WP-04
+.claude/bin/test_acceptance_v221.py     WP-04  its version pin: 2.21.2
+.claude/bin/test_fix_routing.py         AT
+.claude/flow-history.json               by hand: regenerated as the last commit
 ```
 
 ## 4b. Existing code context
 
 | What an implementer needs to know | Where it is | Pattern or rule | Source |
 |---|---|---|---|
-| `FAILURE_LINE_RE` (a failing line, Pester's `[-]` included) and `PASS_LINE_RE` (a passing test's line, Pester's `[+]` included) | `.claude/bin/verification.py:21`, `.claude/bin/verification.py:34` | Unchanged. The header regex goes beside them | read |
-| `failure_lines(lines)`: the lines that match `FAILURE_LINE_RE`, normalised by `normal_failure` (no durations, counts or repeated spaces), sorted, without repeats | `.claude/bin/verification.py:211-218` | `failing_lines` is its first 10 | read |
-| `scan_lines(manifest, key, console)`: with a report read, one line per failing test; otherwise `[line for line in console if FAILURE_LINE_RE.search(line) or not PASS_LINE_RE.search(line)]` | `.claude/bin/verification.py:220-229` | Only the second branch changes | read |
-| Its three callers: `run_phases` (every verify phase, and the baseline), `verify` (the acceptance phase), `gate_check` (the stop gate of a package) | `.claude/bin/verification.py:231-245`, `.claude/bin/verification.py:353-360`, `.claude/bin/stage.py:325-352` | The fix reaches all three through `scan_lines` | read |
-| `attribute(manifest, lines, by_criteria=True)`: a package is a suspect when the lines name one of its files or, by criteria, one of its `acs` (`AC-NNN` anywhere in the text) | `.claude/bin/verification.py:247-266` | Unchanged: it reads what `scan_lines` keeps | read |
-| `verify`: per phase `status` (`ok`, `pre-existing failure`, `regression`, `fails`); a regression gets `new_failures = new[:10]` and its `_scan` filtered to the new lines; the acceptance phase is `{name, command, passed, verdict, status, _scan}` with no `tail`; the suspects loop pops `_scan` from every phase | `.claude/bin/verification.py:327-378` | `failing_lines` is set in that loop, where `_scan` is popped | read |
-| The baseline saves `failures` (every `failure_lines` of a failing phase) and `verify` compares with it | `.claude/bin/verification.py:307-325`, `.claude/bin/verification.py:338-341` | Hence the new key is `failing_lines`, not `failures`: the baseline's key keeps its meaning | read |
-| `close_stage` prints `GATE: WP-01=1 WP-02=0` for the packages it closes, from `gate_denials(lambda d: None)` | `.claude/bin/stage.py:236-277` (the GATE line at 268-271) | Zones are added there, only when their count is above 0 | read |
-| A test pins that a QA stage prints no GATE line when QA was not refused | `.claude/bin/test_guardrail.py:241-249` | Must stay green: hence "only when above 0" | read |
-| `gate_line(output)` in the fallback engine and `gateLine(out)` in the workflow read `(WP-\d+)=(\d+)` from the `GATE:` line | `.claude/bin/pipeline.py:93-96`, `.claude/workflows/agentic-implement.js:300-305` | The regex widens to `(WP-\d+\|AT\|QA)` | read |
-| The engines sum the denials after a wave closes, only from `close-stage <wave>` | `.claude/bin/pipeline.py:470-478`, `.claude/workflows/agentic-implement.js:470-471` | The same sum after wave 0 closes and after QA closes | read |
-| Wave 0 closes with `close-stage acceptance AT=<state> --expect red`, once per round; a revision round reopens the stage (`open-stage acceptance`, which resets AT's counter) | `.claude/bin/pipeline.py:360-372`, `.claude/bin/pipeline.py:390`, `.claude/workflows/agentic-implement.js:724-731`, `.claude/workflows/agentic-implement.js:746` | Summing every round's line counts each denial once | read |
-| QA closes through `seq([close_qa, ...])`: `step(fin, 0)` is the `close-stage qa` step, in both of its branches | `.claude/bin/pipeline.py:705-729`, `.claude/workflows/agentic-implement.js:805-825` | Its output is read from `step(fin, 0).output` | read |
-| `seq` of one command returns `{steps: [{cmd, exit_code, output}]}`; of several, the JSON of `agentic.py seq` | `.claude/workflows/agentic-implement.js:190-198` | Same shape for both | read |
-| `verification_defects` / `verificationDefects` build one `evidence` from every failing phase: `name + ": " + tail.join("\n")`, cut at 1500 characters | `.claude/bin/pipeline.py:280-293`, `.claude/workflows/agentic-implement.js:348-356` | The function that changes in both engines | read |
-| The conformance scenarios: each engine runs a simulated world declared in `conformance.json`; `ConformanceTests` compares `prompts` and `gate_denials` among other keys; `run_scenario(decl)` runs one in the fallback engine and returns its summary, `prompts` keyed `"<agent type>:<id>#<n>"` | `.claude/bin/test_pipeline.py:199-226`, `.claude/bin/test_pipeline.py:154-166` | The acceptance tests use `run_scenario` and `test_workflow.mjs --dump` | read |
-| The simulated world splits a `seq a + b` into steps and answers each by `gate_fail` prefix; `verify` answers come from a scenario's `verify` list | `.claude/bin/test_workflow.mjs:54-57`, `.claude/bin/test_workflow.mjs:517`, `.claude/bin/test_pipeline.py:51-60` | A scenario can give `close-stage qa` and `close-stage acceptance` their own output | read |
-| The existing scenarios "verification fails on a package: it is fixed and verified again" and "gate denials are summed from close-stage" | `.claude/bin/conformance.json:50`, `.claude/bin/conformance.json:793` | The shape of the new ones | read |
-| Pester tests with and without a report: `test_ac_005` (report), `test_ac_006` (console, pytest lines), `test_ac_009` (the stop gate reads the report) | `.claude/bin/test_runner_reports.py:207-230`, `.claude/bin/test_runner_reports.py:275-285` | They stay green | read |
-| `new_failures` is pinned by tests | `.claude/bin/test_runner_reports.py:231-247`, `.claude/bin/test_agentic.py:686`, `.claude/bin/test_agentic.py:710` | Unchanged | read |
-| The release pattern of a fix | `.claude/bin/upgrade.py:156-161`, `.claude/bin/test_quality_limits.py:158-170` | `NOTES["2.21.1"]` right above `"2.21.0"` | read |
-| The last minor release's acceptance file pins `2.21.0` | `.claude/bin/test_acceptance_v221.py:140-153` | Only the pin changes | read |
-| Tests pinning `implement.md`: one line with `` `zone_suspects` ``; `` `gate_denials` `` present | `.claude/bin/test_quality_limits.py:149-155`, `.claude/bin/test_definitions.py:231-235` | Stay green | read |
-| The fix call's label is `"<wp> (fix)"`, so its prompt key is `implementer:<wp> (fix)#<n>` | `.claude/bin/pipeline.py:415`, `.claude/bin/test_fix_cycles.py:132` | The key AC-005 reads | read |
-| The guide's lines on the stop gate and on failed verifications; `/implement`'s line on `gate_denials` | `docs/how-it-works.md:389`, `docs/how-it-works.md:391`, `.claude/commands/implement.md:71` | Lines to extend | read |
-| What Pester 4 and 5 print on the console (`Describing`, `Context`, `[+]`, `[-]`, indentation) | not measured: no Pester run in this session | Section 11 | inferred |
+| `close_stage(manifest, label, items)` parses `ID=state` with `partition("=")`, checks `jid in entities(manifest)` and `state in LEDGER_STATES`, and dies with `close-stage: invalid entry '<item>' (...)`. With `--fix` it sets `fix_count` to the ledger's value + 1 and calls `write_fix_diffs` with that number | `.claude/bin/stage.py:236-277` (the fix count at 256-260) | `@N` is split off the state after the `=`. Without `@N`, unchanged | read |
+| `write_fix_diffs(manifest, label, attempts)` returns early when `tree-<label>.txt` is missing or `git_tree()` is falsy. It skips a package with no files and writes `runs/<ID>.fix-<N>.diff`, or `(this attempt changed no file)` | `.claude/bin/stage.py:284-304` | The early return becomes a placeholder write | read |
+| `LEDGER_STATES`; `ledger_read`/`ledger_update` (the ledger is never cleared by the flow) | `.claude/bin/core.py:30`, `.claude/bin/core.py:379-389` | `fix_count` is set to N, not incremented, when N is given | read |
+| `close-stage`'s usage text, in the module docstring and in `cmd_close_stage` | `.claude/bin/agentic.py:14`, `.claude/bin/agentic.py:216-219` | Mention `ID=state@N` | read |
+| The manual `run-wave --fix` caps by the ledger's `fix_count` and increments it | `.claude/bin/launch.py:397-433` | Unchanged | read |
+| CLI tests that close with `--fix` and no `@N`: two cycles give `fix_count` 2; the diff holds only that package's files | `.claude/bin/test_agentic.py:485-490`, `.claude/bin/test_agentic.py:572-583` | Must stay green: hence `@N` is optional | read |
+| Fallback engine: `wave_states` builds `WP-01=done` marks; `launch_wave` returns `close-stage {wave} {marks}{' --fix'}`, and its attempt is `self.fix_count.get(wp, 0) + 1`, the retry diff `fix-{attempt - 1}`; `fix_cycle` increments `self.fix_count` after the waves run | `.claude/bin/pipeline.py:85-90`, `.claude/bin/pipeline.py:415-446`, `.claude/bin/pipeline.py:508-522` | The marks of a fix wave gain `@<attempt>` | read |
+| Native engine: `waveStates`, `launchWave` (`attempt = (fixCount[wp] \|\| 0) + 1`; `closeCmd` at 439), `fixCycle` | `.claude/workflows/agentic-implement.js:298`, `.claude/workflows/agentic-implement.js:409-441`, `.claude/workflows/agentic-implement.js:498-517` | The same change | read |
+| The readers of diffs: the retry prompt, the re-review (`fixDiffs` / the `diffs` join) and QA's re-check | `.claude/workflows/agentic-implement.js:418`, `.claude/workflows/agentic-implement.js:679-686`, `.claude/bin/pipeline.py:430`, `.claude/bin/pipeline.py:618-619`, `.claude/bin/pipeline.py:667-668` | Unchanged: they already use the in-run counter, which the writer now follows | read |
+| Tests that pin the fix close's gate string | `.claude/bin/test_pipeline.py:405-414` (`startswith("close-stage 1 WP-01=blocker --fix")`), `.claude/bin/test_workflow.mjs:180-187`, `.claude/bin/test_workflow.mjs:418-423` (`gates.includes('close-stage 1 WP-02=done --fix')`) | WP-02 updates them to `@1` | read |
+| `attribute(manifest, lines, by_criteria)` maps text to packages by whole path. It normalises `\` to `/` and strips `ROOT/`, and a file matches with `(?<![\w./-])` + escaped path + `(?![\w-])` (no lookahead for a directory ending in `/`) | `.claude/bin/verification.py:277-295` | `split_by_owner` uses the same matching, without criteria | read |
+| `findings.py`: `fingerprint` (FNV-1a over axis\|tier\|rule\|file\|problem) and `with_fingerprints` (a repeat gets `-2`, `-3`); the workflow's copies | `.claude/bin/findings.py:70-94`, `.claude/workflows/agentic-implement.js:236-253` | A part's fingerprint is `fingerprint(part)`, suffixed the same way if taken | read |
+| `pipeline.py` imports from `findings` | `.claude/bin/pipeline.py:19` | Add the new names to that import | read |
+| The full review: findings marked with fingerprints, the graves verified, `record[axis].confirmed`, `run.review`, then `close_review` with the confirmed per axis | `.claude/bin/pipeline.py:567-609`, `.claude/workflows/agentic-implement.js:568-616` | The split runs on each axis's confirmed list before `record` is built | read |
+| The re-review: open findings of the fixed packages by `wp`, a verdict per fingerprint; its prompt (`re_review` in the spec; inline in the workflow) | `.claude/bin/pipeline.py:611-646`, `.claude/workflows/agentic-implement.js:623-662` | One sentence is appended after "with the line that shows it." in both | read |
+| A test pins the head of the re-review prompt (the text before `{findings}`) | `.claude/bin/test_workflow.mjs:602-611` | The new sentence goes after `{diffs}`: the head does not change | read |
+| `pipeline_plan` prints the plan JSON (`wave_of`, `work_packages`, `agents`, …); `wps(manifest)` gives each package with its `files` | `.claude/bin/launch.py:662-678` | Add `owners` and `root` | read |
+| The conformance plan the simulated worlds answer `pipeline-plan` with (no `owners`) | `.claude/bin/conformance.json` (key `plan`), `.claude/bin/test_pipeline.py:65-66` | The engines must work without `owners`/`root` | read |
+| QA's schema (`status` PASS\|FAIL\|BLOCKER; required `status, plan, defects, gaps, needs_validation`) in the spec and the workflow's copy; a test compares the copies | `.claude/workflows/agentic-implement.js:127-145`, `.claude/bin/test_workflow.mjs:587-600` | Two optional properties, the same in both | read |
+| `qa_stage`/`qaStage`: `mode` is `full` (no report, or no source since), `kept` (only the standards reviewer since) or `scoped`; `kept` makes no call and re-records the standing report in `qa_passes` | `.claude/bin/pipeline.py:656-678`, `.claude/workflows/agentic-implement.js:688-712` | An environment-blocked standing report forces `full` | read |
+| The end of a pass: `baseline` (design, no WP, needs-validation items) becomes `qa_pending`; with nothing eligible, `result` is `REVIEW` when there are defects, QA is `BLOCKER` or a pending item blocks | `.claude/bin/pipeline.py:712-740`, `.claude/workflows/agentic-implement.js:806-829` | The QA items join `baseline`; `detail` is set in that branch | read |
+| `needs_item`/`needsItem` and `untestedItem`, the shape of a `needs validation` pending item (with `kind`, `claim`, `fact`, `how_to_check`) | `.claude/bin/pipeline.py:250-256`, `.claude/workflows/agentic-implement.js:283`, `.claude/workflows/agentic-implement.js:290-295` | `qa_not_run_items` builds the same shape | read |
+| `summarize` compares `detail`, `pending` types and `qa_passes` across engines | `.claude/bin/test_pipeline.py:154-171`, `.claude/bin/test_pipeline.py:211-222` | The new scenarios are checked by it with no change | read |
+| QA tests pin `qa_passes` modes for the existing scenarios | `.claude/bin/test_qa_recheck.py:57-116` | Must stay green: only an environment `BLOCKER` changes the mode | read |
+| `OPEN_ENDED`, `open_ended_rule` (a rule is open-ended when it is empty, has `*` in its prefix, or is one token in `OPEN_ENDED`) and `open_ended_command` | `.claude/bin/manifest_check.py:30-33`, `.claude/bin/manifest_check.py:39-43`, `.claude/bin/manifest_check.py:46-60` | `open_ended_rule` gains the PowerShell case; `open_ended_command` does not change | read |
+| `command_errors` reports `allow_bash: rule too broad (…)`; `complexity_warnings` returns the warnings `validate` prints as `warning: …` | `.claude/bin/manifest_check.py:186-200`, `.claude/bin/manifest_check.py:78-97`, `.claude/bin/agentic.py:187-192` | The PowerShell warning is appended by `complexity_warnings` (its docstring widened), so `agentic.py` needs no change for it | read |
+| Tests of broad and specific rules, and of glob commands | `.claude/bin/test_agentic.py:206-214`, `.claude/bin/test_manifest_check.py:27-37` | Stay green | read |
+| `sync_permissions` adds `Bash(cmd)` and `Bash(cmd:*)` for the acceptance command and every verify command, never removes anything, and prints `N rule(s) added …` | `.claude/bin/installer.py:115-129` | PowerShell code commands get the exact rule only, and their `:*` form is removed | read |
+| Its test: other rules kept, idempotent | `.claude/bin/test_agentic.py:509-521` | Stays green | read |
+| The PowerShell pack's command table recommends `powershell … -Command "Invoke-Pester …"` | `.claude/rules-library/powershell.md:43-49` | Replaced by a runner script with `-File` | read |
+| `/architect`'s `allow_bash` bullet | `.claude/commands/architect.md:218` | Extended | read |
+| QA's `status` line; the standards reviewer's "one finding per rule and file"; the reviewer's report line | `.claude/agents/qa.md:67`, `.claude/agents/standards-reviewer.md:27`, `.claude/agents/reviewer.md:107` | Lines to extend | read |
+| The guide's lines on fix diffs and statuses; the how-to's diff line; `/implement`'s `detail` and `qa_passes` lines | `docs/how-it-works.md:155`, `docs/how-it-works.md:366`, `docs/how-it-works.md:392`, `docs/how-to/README.md:204`, `.claude/commands/implement.md:51`, `.claude/commands/implement.md:59` | Lines to extend | read |
+| The release pattern of a fix: `NOTES["2.21.1"]` right above `"2.21.0"`; the minor release's test pins the version | `.claude/bin/upgrade.py:156-163`, `.claude/bin/test_acceptance_v221.py:138-145` | `NOTES["2.21.2"]` right above `"2.21.1"`; pin `2.21.2` | read |
+| `test_lean.py` holds the flow's size to `flow-budget.json` (5 % slack below) | `.claude/bin/test_lean.py:24-25`, `.claude/bin/test_lean.py:57-70` | Raise what is exceeded, with its why | read |
+| The quality ratchet: a file at or under 800 lines may grow to 800; a function's allowance is 60 lines or its stored value; no new line over 120 characters in a file at its stored count | `.claude/bin/quality.py:225-243`, `.claude/quality-baseline.json` | Measured now: `pipeline.py` 790 lines (allowed 800), 26 long (allowed 29); `agentic-implement.js` 842 (allowed 861), 64 long (allowed 64); `Pipeline.judge` 71 (allowed 73); `runAfterPlan` 126 (allowed 128) | read |
 
-What must not change: the `reports` path, `attribute`, `own_failure`, the baseline's `failures`, the package gate's `GATE:` output, the stages' `check`, `verification_failures`.
+What must not change: a `close-stage` without `@N`; the readers' diff names; `attribute`; the fingerprint formula; the verify phases; `open_ended_command`; the `reports` path; QA `kept` mode for any report that is not an environment `BLOCKER`; a finding whose evidence names no other package's file (the same object, no `scope`).
 
 ## 5. Data model
 
-```python
-# verification.py, beside PASS_LINE_RE
-HEADER_LINE_RE = re.compile(r"^\s*(?:Describing|Context)\s+\S")  # Pester's block headers: a test's name, not a result
-MAX_FAILING_LINES = 10  # as new_failures
+```text
+close-stage item           ID=state            (as today)
+                           ID=state@N          (only with --fix; N an integer >= 1)
+
+plan (pipeline-plan JSON) + "owners": {"WP-01": ["src/a.py", "src/b/"], ...}   every package's manifest files, as written
+                          + "root":   "/abs/path/of/the/repo"                  ROOT.as_posix()
+
+finding part (a split)     the finding's fields, and:
+  "wp"          the owning package
+  "file"        the first of its scope (sorted), for a part that is not the original
+  "scope"       [paths]  sorted, unique: the files of that package named in evidence/fix (the original part also
+                         holds its own normalised "file")
+  "split_from"  the original finding's fingerprint (parts other than the original)
+  "fingerprint" fingerprint(part), suffixed -2, -3 … if already taken in the axis's list
+  (a part other than the original has no "line")
+
+QA report + "blocker_kind": "environment" | "design"   optional; meaningful only with status BLOCKER
+          + "not_run": ["<command>", ...]               optional; the commands QA could not run
+
+pending item of a QA environment blocker (one per not_run command):
+  {"type": "needs validation", "source": "qa", "wp": null, "file": null, "kind": "qa not run",
+   "problem": cmd, "claim": cmd, "fact": "not run: the environment refused it", "how_to_check": "run " + cmd}
+  with no not_run: one item, cmd = "QA's validation" and how_to_check = "allow QA's test commands, then run /implement again"
+
+QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see the pending items of kind "qa not run")'
 ```
-
-A **summary line** is a line `COUNT_BEFORE_RE` matches (`.claude/bin/verification.py:29-30`) that is not a Pester failing test (`^\s*\[-\]`; `[-] reports Errors: 0 for a clean file` is a failing test): Pester's `Tests Passed: 2, Failed: 1, Skipped: 0`. It names no test, so it keeps no header and it closes every open block; it is itself kept, as today.
-
-A blocking phase of `verify`'s output gains one key:
-
-```json
-{"name": "acceptance", "command": "...", "passed": false, "verdict": "...", "status": "fails",
- "failing_lines": ["[-] XMM-Panel.ps1 has UTF-8 BOM, CRLF only and no non-ASCII"]}
-```
-
-`failing_lines` = `failure_lines(<the phase's _scan>)[:MAX_FAILING_LINES]`, on every phase whose status is `regression` or `fails`, possibly `[]`. Phases with another status do not get it.
-
-`close-stage`'s summary line, examples:
-
-```
-GATE: WP-01=1 WP-02=0          (a wave: unchanged)
-GATE: AT=1                     (close-stage acceptance AT=done after one zone denial)
-                               (close-stage qa QA=pass with no denial: no GATE line, as today)
-```
-
-`gate_denials` in the result may now hold `"AT"` and `"QA"` beside package ids: `{"WP-01": 3, "AT": 1}`. Like a package, a zone appears only with a sum above 0.
-
-The evidence of one failing phase, in both engines:
-
-```
-<name>: <lines joined by "\n">
-lines = new_failures if it is a non-empty list, else failing_lines if non-empty, else tail (or [])
-```
-
-The phases are joined by `"\n"` and the whole text is cut at 1500 characters, as today.
 
 ## 6. Contracts between modules
 
-**`verification.py`:**
+**`agentic.py close-stage L ID=state[@N]... [--expect red|green] [--fix]`** (WP-01)
+- `@N` is accepted only with `--fix`, with N an integer ≥ 1. Otherwise it dies with exit 1 and `close-stage: invalid entry '<item>' …` (the existing message).
+- With `@N`: the ledger's `fix_count` of ID becomes N, and the diff is written to `.claude/state/runs/<ID>.fix-<N>.diff`.
+- Without `@N`: exactly as today (ledger + 1).
+- `GATE:`, `RESULT:` and the exit codes are unchanged. The ledger's state is the part before `@`.
 
-```python
-def console_lines(console)
-    """The console lines that failure comparison and attribution read when no report is read: every line that is
-    not a passing test's, except a Pester block header (HEADER_LINE_RE), which is kept only when a failing line
-    (FAILURE_LINE_RE) follows it inside its block. A `Describing` opens a block and closes the one before; a
-    `Context` opens a block inside the current `Describing` and closes the previous `Context`. The headers that
-    enclose a failure are kept once, in their order, right before the first failing line under them. A header is
-    never kept because its own text matches FAILURE_LINE_RE. A summary line (COUNT_BEFORE_RE: "Tests Passed: 2,
-    Failed: 1"), unless it starts with "[-]", is not a failing line for this rule: it keeps no header and closes
-    every open block."""
-```
+**`stage.write_fix_diffs(manifest, label, attempts)`** (WP-01)
+- When the tree file is missing or `git_tree()` is falsy, it writes `(the diff of this attempt could not be recorded)\n` to every attempt's file of a package with files, instead of returning.
 
-`scan_lines` returns `console_lines(console)` in place of today's comprehension, with the same `state`.
+**`findings.split_by_owner(findings, owners, root) -> list`** (WP-02)
+- `findings` is one axis's confirmed list, each item with `fingerprint`. `owners` is `{wp: [files]}` (it may be `{}` or `None`). `root` is a string (it may be `""` or `None`).
+- **Text matched:** `evidence` + `"\n"` + `fix` (missing ones are `""`), with `\` replaced by `/` and, when `root` is non-empty, every `root + "/"` removed.
+- **Which files a package has in the text:** `mentioned(wp)` is that package's files that match like `attribute` (`.claude/bin/verification.py:286-287`).
+- **No other package named:** when no package other than the finding's `wp` has a mentioned file, the item is returned unchanged (the same object, no `scope`).
+- **Otherwise** the output holds, in this order:
+  - the original, with `scope` = sorted unique (its own normalised `file`, which has the same replacements, plus `mentioned(its wp)`);
+  - then, for each other package with mentioned files, in ascending id order, a part with `wp`, `file` = `scope[0]`, `scope` = sorted `mentioned(wp)`, `split_from` = the original's fingerprint, no `line`, and `fingerprint` = `fingerprint(part)`. If that fingerprint is already in the output, it gets `-2`, `-3`, … as `with_fingerprints` does.
+- Order is kept: each finding's group goes in its input position.
+- It never raises on non-string fields: they are treated as `""`.
 
-`verify(manifest)`: as today, plus `failing_lines` on every blocking phase (section 5), set where `_scan` is popped (after a regression's `_scan` has been filtered, so a regression's `failing_lines` are its new lines).
+**Workflow `splitByOwner(findings)`** (WP-02): the same rules, reading `plan.owners` and `plan.root`. It must produce exactly what the Python function produces; the conformance scenarios of Annex A compare them.
 
-**`stage.py`:** `close_stage` keeps the package part of the `GATE:` line as is. For each mark whose id is `AT` or `QA` with a denial count above 0, it appends `<id>=<n>`; it prints the line when the line has at least one entry. Order: packages first, in the order of the marks, then the zones, in the order of the marks.
+**`findings.qa_environment_blocked(qa) -> bool`** (WP-02): `qa` is a dict with `status == "BLOCKER"` and `blocker_kind == "environment"`. The workflow mirrors it as `qaEnvironmentBlocked(qa)`.
 
-**Both engines** (`pipeline.py`, `agentic-implement.js`), equivalent in every scenario:
+**`findings.qa_not_run_items(qa) -> list`** and **`findings.QA_NOT_RUN_DETAIL`** (WP-02)
+- Returns the items of section 5 when `qa_environment_blocked(qa)`, else `[]`.
+- Non-string entries of `not_run` are skipped, and repeats are kept once, in order.
+- The workflow mirrors it as `qaNotRunItems(qa)` and `QA_NOT_RUN_DETAIL` with the same text.
 
-- `gate_line(output)` / `gateLine(out)` return `{id: n}` for `(WP-\d+|AT|QA)=(\d+)`.
-- One helper, `add_gate_denials(output)` / `addGateDenials(out)`, adds each `n > 0` to `run.gate_denials[id]`; a missing or null output adds nothing. The wave close (`.claude/bin/pipeline.py:475-477`, `.claude/workflows/agentic-implement.js:471`) calls it in place of today's loop.
-- One more, `close_seq(cmds, label)` / `closeSeq(cmds, label)`: runs `seq(cmds, label)`, calls the helper with the output of its first step when there is one, and returns what `seq` returned. Wave 0's `close-stage acceptance` and both QA closes call `close_seq` in place of `seq`, on the same line: `runAfterPlan` (126 lines, allowance 128) and `Pipeline.judge` (71 lines, allowance 73) may not grow. Since it runs before any `stop`, a failed close still records its denials.
-- "A non-empty list" is `isinstance(x, list) and x` in Python and `Array.isArray(x) && x.length` in JS.
-- `verification_defects(v)` / `verificationDefects(v)`: the evidence of section 5. Nothing else changes in a defect.
+**Engines** (WP-02, both, equivalent):
+- **Fix closes.** A fix wave's marks are `<wp>=<state>@<attempt>`, with `attempt` = the in-run count before the cycle + 1 (the same number its prompt uses). An implement wave's marks have no `@`.
+- **The split.** In the full review, each axis's confirmed list goes through the split before `record` and `run.review` are built. The split parts are in `confirmed` and reach `close_review`, fixes and re-reviews like any finding. `refuted`, `advisory` and `waived` are untouched.
+- **The re-review prompt** (`re_review` in the spec and inline in the workflow) appends, right after `with the line that shows it. `, the sentence `A finding with a "scope" is judged only in those files: what its evidence says about other files is another package's finding. `
+- **QA's next pass.** If the standing QA report is environment-blocked, the next `qa_stage` uses mode `full` whatever the sources.
+- **The end of a QA pass.** `qa_not_run_items(qa)` joins `baseline` (so `qa_pending`), after the needs-validation items. When the run ends in the "nothing eligible" branch and the standing QA is environment-blocked, `run.detail = QA_NOT_RUN_DETAIL`. The result stays `REVIEW`, because QA is `BLOCKER`.
+
+**`launch.pipeline_plan(manifest)`** (WP-02): adds `"owners": {wp_id: list(wp["files"])}` and `"root": ROOT.as_posix()`.
+
+**Spec** (WP-02): `schemas.qa.properties` gains `blocker_kind` (`{"type": "string", "enum": ["environment", "design"]}`) and `not_run` (`{"type": "array", "items": {"type": "string"}}`). `required` is unchanged, and the workflow's `QA_SCHEMA` copy is the same.
+
+**`manifest_check.runs_code(tokens) -> bool`** (WP-03)
+- `tokens` is a list of words (shlex-split).
+- **Program.** The program is `tokens[0]` after its last `/` or `\`, lowercased, with a final `.exe` removed. When it is not `powershell` or `pwsh`, the answer is False.
+- **Flags.** Each later token is lowercased, and a leading `/` reads as `-`.
+  - A token is a *file flag* when it is `-f` or `-file`.
+  - A token is a *code flag* when it is `-c`, `-e` or `-ec`; or it has 3 or more characters and `-command` starts with it; or it has 4 or more characters and `-encodedcommand` starts with it.
+- **Answer.** True unless a file flag comes before every code flag. So no file flag means True.
+
+**`manifest_check.open_ended_rule(rule)`** (WP-03): as today, and also True when the rule ends with `:*` and `runs_code(shlex-split prefix)` is True. `OPEN_ENDED` gains `powershell`, `pwsh`, `powershell.exe`, `pwsh.exe`, `cmd` and `cmd.exe`.
+
+**`manifest_check.code_runner_commands(manifest) -> list`** (WP-03): the acceptance command and the verify commands (strings, in that order, without repeats) for which `runs_code(shlex.split(cmd))` is True. On a `ValueError`, it uses `cmd.split()`.
+
+**`manifest_check.complexity_warnings(manifest)`** (WP-03): also appends, per command of `code_runner_commands`, a warning that contains the command, `-File` and `.claude/rules-library/powershell.md`. Its exact text is free.
+
+**`installer.sync_permissions(manifest)`** (WP-03)
+- For a command in `code_runner_commands`, it adds only `Bash(<cmd>)` and removes `Bash(<cmd>:*)` from `permissions.allow` if present.
+- For every other command, nothing changes.
+- **Output.** The existing line is unchanged. When something was removed, it adds a second line `N rule(s) removed from .claude/settings.local.json: …`.
+- It is idempotent.
 
 ## 7. Conventions
 
-- English everywhere; usage errors keep the `Uso:` prefix (design 0016).
-- No type annotations in signatures (Python 3.9), as in the rest of `.claude/bin`. This overrides the python rules' "type annotations on every public signature": it is the existing code's style, not a finding.
-- Every `open` and `read_text` names `encoding="utf-8"`.
-- The two engines change together: a scenario that differs in `prompts` or `gate_denials` fails `ConformanceTests`.
-- This repository's own quality phase measures `.claude/bin` and `.claude/workflows`, the tests of this design included: no line over 120 characters, no new function over 60 lines (100 in a test), no new file over 800 lines. Recorded allowances that this design reaches (`.claude/quality-baseline.json`): `agentic-implement.js` 861 lines (831 today) and 64 lines over 120 characters (64 today); `agentic-implement.js::runAfterPlan` 128 lines (126 today); `pipeline.py::Pipeline.judge` 73 lines (71 today); `test_pipeline.py` 16 lines over 120 characters (16 today). None of them may grow: a new long expression is split. `pipeline.py` is at 773 of 800 lines.
-- `test_agentic.py` (1,875 lines) and `test_guardrail.py` do not grow: new unit cases go in `test_failure_lines.py`.
-- The guides do not cite flow version numbers. Commit format `type: summary`; the flow history is regenerated as the last commit.
+- The project's own: English in code, comments and messages; standard library only; docstrings in the style of the surrounding module; no `print` debugging left.
+- **The two engines stay equivalent.** Every behaviour of WP-02 lands in `pipeline.py` and in `agentic-implement.js` with the same output, and `conformance.json` scenarios prove it (`test_pipeline.ConformanceTests`).
+- **The workflow script has no disk:** it cannot import `findings.py`. The JS mirrors are kept beside `fingerprint` (`.claude/workflows/agentic-implement.js:236-253`) and must give the same results.
+- **Quality ratchet:** no file or function may pass its allowance (4b's last row). A package may compact code of its own files to make room (for example one-line object literals in the workflow's schemas), without changing behaviour. `quality-baseline.json` is not edited.
+- **Errors:** `die()` for CLI misuse, with the existing message forms. The engines never raise on an agent's malformed report: they treat a missing field as absent.
+- **Commits:** imperative subject, `Fixes #NNN` lines in the body of the last commit of each package.
 
 ## 8. Work packages and acceptance criteria
 
 ### Acceptance criteria
 
-The console of AC-001 and AC-002, written by a script `t.py` that prints it and exits 1 (the shape of `.claude/bin/test_runner_reports.py:207-230`):
-
-```
-Describing AC-601 launcher
-  [+] starts 3ms
-Describing AC-602 settings
-  Context AC-605 flags
-    [+] lists the flags 2ms
-Describing FeatureFlagList
-  [-] XMM-Panel.ps1 has UTF-8 BOM, CRLF only and no non-ASCII 5ms
-Tests Passed: 2, Failed: 1
-```
-
-The manifest of AC-001 to AC-003: three packages `WP-01` (`acs` `["AC-601"]`), `WP-02` (`["AC-602"]`), `WP-03` (`["AC-605"]`), each owning one file under `src/` that no output names, `verify` `{"tests": "<python> t.py"}`, no `reports`.
-
-- AC-001 · A Pester header of passing tests names no package (reproduces bug 1)
-  - Scenario: the manifest and console above, in a temporary repo built by the tests' `Repo` helper (`.claude/bin/test_agentic.py:45-76`).
-  - Action: `agentic.py verify`.
-  - Expected: exit 3; `blocking` contains `tests`; `suspects` is `{}`. Today it is `{"WP-01": …, "WP-02": …, "WP-03": …}`. The same with the `Describing AC-601 launcher` block (header and `[+]` line) moved to the end, right before the summary line, and again with the summary line replaced by `Tests Passed: 3, Failed: 0`: `suspects` is `{}` in both.
-  - Must not: any package in `suspects`; a header kept by the summary line; a `Traceback` on stderr.
-  - Check: `test_failure_evidence.py`
+- AC-001 · A fix's diff carries the run's attempt number, whatever the ledger holds (reproduces issue 140)
+  - Scenario: the CLI test repo of `.claude/bin/test_agentic.py` (WP-02 owns `src/b/`). `src/b/x.py` contains `v1`, the ledger's `WP-02.fix_count` is 3 (left by earlier runs), and `.claude/state/runs/WP-02.fix-1.diff` contains `STALE`.
+  - Action: `open-stage 1`; write `v2` to `src/b/x.py`; `close-stage 1 WP-02=done@1 --fix`.
+  - Expected: `runs/WP-02.fix-1.diff` contains `+v2` and not `STALE`; the ledger's `WP-02.fix_count` is 1; `runs/WP-02.fix-4.diff` does not exist.
+  - Must not: write `fix-4`, or leave `STALE`.
+  - Check: `test_fix_routing.py`.
   - WP: WP-01
 
-- AC-002 · A failing test keeps the header that names its criterion, at both levels
-  - Scenario: as AC-001, with the console changed: (a) the `[-]` line moved right under `Describing AC-602 settings` (before its `Context`); (b) the `[-]` line moved under `Context AC-605 flags`; (c) (a)'s console with a passing block prepended: `Describing AC-603 failure handling` and one `[+]` line.
-  - Action: `agentic.py verify` in each.
-  - Expected: (a) `suspects` has exactly `WP-02`, with `acs` `["AC-602"]`; (b) exactly `WP-02` and `WP-03` (the `Context` is inside `AC-602`'s block); (c) exactly `WP-02`, and no package answers for `AC-603` (the manifest of (c) gives `WP-01` `acs` `["AC-601", "AC-603"]`).
-  - Must not: a package whose criterion's block has no failing line; a header kept because its words match `FAILURE_LINE_RE`.
-  - Check: `test_failure_evidence.py`
+- AC-002 · An attempt whose diff cannot be computed overwrites the file with a placeholder; `@N` needs `--fix`
+  - Scenario: as AC-001, after `open-stage 1`, delete `.claude/state/tree-1.txt`.
+  - Action: `close-stage 1 WP-02=done@1 --fix`; then, in a fresh stage, `close-stage 1 WP-02=done@1` (no `--fix`) and `close-stage 1 WP-02=done@0 --fix`.
+  - Expected: `runs/WP-02.fix-1.diff` is exactly `(the diff of this attempt could not be recorded)\n`. The two later calls exit 1, and their output contains `invalid entry`.
+  - Must not: `STALE` survive; an `@N` accepted without `--fix`.
+  - Check: `test_fix_routing.py`.
   - WP: WP-01
 
-- AC-003 · The stop gate does not refuse a package for a passing header
-  - Scenario: the manifest of AC-001 with `acceptance.command` `<python> acc.py`, where `acc.py` prints the console of AC-001 and exits 1; no `reports`.
-  - Action: the hook receives an implementer's `DONE` report with `AGENTIC_WP=WP-02` (the payload of `.claude/bin/test_runner_reports.py:270-273`).
-  - Expected: exit 0; `.claude/state/gate.json` gains no `WP-02` entry. With the `[-]` line moved under `Describing AC-602 settings`, the same call exits 2 and stderr contains `AC-602`.
-  - Must not: a denial for a criterion whose tests pass.
-  - Check: `test_failure_evidence.py`
-  - WP: WP-01
-
-- AC-004 · Every blocking phase lists its failing lines, the acceptance phase included
-  - Scenario: a repo with one package (`acs` `["AC-001"]`), `verify` `{"tests": "<python> t.py"}` where `t.py` prints `FAILED acceptance/test_x.py::test_ac_001_total - assert 3 == 4` and `1 failed, 4 passed in 0.12s` and exits 1, and an acceptance command that prints `[-] XMM-Panel.ps1 has UTF-8 BOM, CRLF only and no non-ASCII` and exits 1. No baseline.
-  - Action: `agentic.py verify`.
-  - Expected: the `tests` phase has `status` `fails` and `failing_lines` containing a line with `test_ac_001_total`; the `acceptance` phase has `status` `fails` and `failing_lines` == `["[-] XMM-Panel.ps1 has UTF-8 BOM, CRLF only and no non-ASCII"]`; each `failing_lines` has at most 10 entries (a `t.py` printing 15 distinct `FAILED` lines gives 10). With both commands exiting 0, no phase has `failing_lines`.
-  - Must not: `failing_lines` on a phase with status `ok` or `pre-existing failure`; a duration such as `0.12s` inside a line of `failing_lines`.
-  - Check: `test_failure_evidence.py`
-  - WP: WP-01
-
-- AC-005 · The fix receives a regression's new failures and a failing phase's lines, in both engines (reproduces bug 2)
-  - Scenario: the conformance scenarios named `a regression's new failures are the fix's evidence` (verify phases: `tests` with `status` `regression`, `tail` `["Tests Passed: 40, Failed: 3"]` and `new_failures` `["[-] XMM-Panel.ps1 has UTF-8 BOM, CRLF only and no non-ASCII"]`; suspect `WP-02`) and `a failing acceptance phase gives its lines to the fix` (phases: `acceptance` with `status` `fails`, no `tail`, `failing_lines` `["FAILED acceptance/test_x.py::test_ac_002_total"]`; suspect `WP-02`), each followed by a passing verification.
-  - Action: `test_pipeline.run_scenario(<the scenario>)`, and `node .claude/bin/test_workflow.mjs --dump`.
-  - Expected: in the fallback engine, the first fix prompt of WP-02 (key `implementer:WP-02 (fix)#1`, the label of `.claude/bin/pipeline.py:415`) contains `[-] XMM-Panel.ps1 has UTF-8 BOM, CRLF only and no non-ASCII` in the first and `FAILED acceptance/test_x.py::test_ac_002_total` in the second, and does not contain `Tests Passed: 40`; the native engine's prompts for both scenarios are equal to the fallback's.
-  - Must not: the evidence built from `tail` when `new_failures` or `failing_lines` has lines; the two engines differing.
-  - Check: `test_failure_evidence.py`
+- AC-003 · Both engines number each fix close by the in-run attempt
+  - Scenario: the conformance scenario `a defect that does not get fixed is capped` (QA reports a high implementation defect on WP-03 on every pass).
+  - Action: run it in the fallback engine (`test_pipeline.run_scenario`) and in the workflow (`node .claude/bin/test_workflow.mjs --dump`).
+  - Expected: in both, the gates that contain ` --fix` are exactly `close-stage 2 WP-03=done@1 --fix` then `close-stage 2 WP-03=done@2 --fix`; the second `implementer:WP-03 (fix)` prompt contains `.claude/state/runs/WP-03.fix-1.diff`; the two summaries are equal.
+  - Must not: a fix gate without `@`; an implement-wave gate with `@`.
+  - Check: `test_fix_routing.py` (the workflow part skipped without `node`, as `ConformanceTests` is).
   - WP: WP-02
 
-- AC-006 · `close-stage` reports the zone's denials
-  - Scenario: the tests' `Repo` with its default manifest; `.claude/state/gate.json` written by the test as `{"AT": {"denials": 1, "last": []}, "QA": {"denials": 2, "last": []}}` after the stage is opened.
-  - Action: `agentic.py open-stage acceptance`, write `gate.json`, `agentic.py close-stage acceptance AT=done`; then `agentic.py open-stage qa`, write `gate.json` again as above, `agentic.py close-stage qa QA=pass`; then `agentic.py open-stage qa`, write `gate.json` as `{}`, `agentic.py close-stage qa QA=pass` (the order of `.claude/bin/test_guardrail.py:241-249`).
-  - Expected: the first output contains the line `GATE: AT=1` before `RESULT:`; the second contains `GATE: QA=2`; the third contains no `GATE:`. A wave's line is unchanged: `close-stage 1 WP-01=done WP-02=done` with `{"WP-01": {"denials": 1}}` prints `GATE: WP-01=1 WP-02=0`.
-  - Must not: `AT=0` or `QA=0` printed; the line of a wave changed.
-  - Check: `test_failure_evidence.py`
-  - WP: WP-01
-
-- AC-007 · The run's record keeps the zone's denials, in both engines (bug 3)
-  - Scenario: the conformance scenario named `zone gate denials are summed from close-stage`: `close-stage acceptance` answers exit 0 with output `ACCEPTANCE (red): red\nGATE: AT=1\nRESULT: OK`, and `close-stage qa` answers exit 0 with `GATE: QA=2\nRESULT: OK`; QA reports `PASS`.
-  - Action: `test_pipeline.run_scenario(<the scenario>)`, and `node .claude/bin/test_workflow.mjs --dump`.
-  - Expected: `gate_denials` == `{"AT": 1, "QA": 2}` in the fallback engine and the same in the native engine; the scenario `gate denials are summed from close-stage` still gives `{"WP-01": 1}`.
-  - Must not: a zone with 0 in `gate_denials`; the engines differing.
-  - Check: `test_failure_evidence.py`
+- AC-004 · A finding that names another package's files is split and each part goes to its owner (reproduces issue 141)
+  - Scenario: the conformance scenario `a finding that names another package's files is split` (Annex A).
+  - Action: run it in both engines.
+  - Expected:
+    - Both engines give `result` `OK` and `fix_cycles` 1, and the summaries are equal.
+    - `implementer:WP-01 (fix)#1` and `implementer:WP-03 (fix)#1` are both called.
+    - WP-03's fix prompt contains `"wp":"WP-03"`, `"file":"src/c.py"`, `"scope":["src/c.py"]` and `"split_from":"F`.
+    - WP-01's contains `"scope":["src/a.py"]` and not `"scope":["src/c.py"]`.
+    - The summary's `re_review` is `{"spec": [0, 0, 0], "standards": [2, 0, 0]}`: both parts were open and both were addressed.
+  - Must not: only WP-01 fixed; a `fix limit reached` pending item; a split when `owners` is absent (every existing scenario keeps its summary).
+  - Check: `test_fix_routing.py`.
   - WP: WP-02
 
-- AC-008 · Docs and release 2.21.1
-  - Scenario: this repository.
-  - Action: read `plugin.json`, `upgrade.NOTES`, `docs/how-it-works.md`, `.claude/commands/implement.md`, the test files.
-  - Expected: version `2.21.1`; `NOTES["2.21.1"]` is the key right above `"2.21.0"`, with at least one note containing `Describing`, one containing `failing_lines` and one containing `gate_denials`; the guide's line that starts `- **Stop gate:**` contains `AT=1`; the guide contains `failing_lines`; the line of `implement.md` that contains `` `gate_denials` `` also contains `` `AT` `` and `` `QA` ``; `test_acceptance_v221.py` pins `2.21.1`.
-  - Must not: `2.21.1` anywhere in `docs/how-it-works.md`.
-  - Check: `test_failure_evidence.py`
+- AC-005 · `split_by_owner`'s edges and the re-review's scope sentence
+  - Scenario: direct calls to `findings.split_by_owner`, and the re-review prompt of the AC-004 scenario.
+  - Action:
+    - Call it with `owners = {"WP-01": ["src/a.py"], "WP-02": ["src/b/"], "WP-03": ["lib/util.py"]}` and `root = "C:/repo"`, on findings whose evidence is (a) `src/a.py:3 only`, (b) `C:\repo\src\b\x.py:7 and src/a.py:3`, and (c) `util.py:9`.
+    - Separately, call it on two findings of the same rule and problem that both name `src/b/x.py`.
+  - Expected:
+    - (a) is returned as the same object, with no `scope`.
+    - (b) gives two items, the original WP-01 one with `scope` `["src/a.py"]` (its `file` being `src/a.py`), then a WP-02 part with `file` `src/b/` and `scope` `["src/b/"]`.
+    - (c) is unchanged: `util.py` is not `lib/util.py`.
+    - The two WP-02 parts get different fingerprints, the second ending in `-2`.
+    - The AC-004 scenario's `standards-reviewer:standards-reviewer (re-review)#1` prompt contains `A finding with a "scope" is judged only in those files`.
+  - Must not: a part with a `line`; `owners=None` or `{}` raising.
+  - Check: `test_fix_routing.py`.
+  - WP: WP-02
+
+- AC-006 · QA that the environment blocked is pending, and the run says so (reproduces issue 142)
+  - Scenario: the conformance scenario `QA blocked by the environment is pending, not a verdict` (Annex A).
+  - Action: run it in both engines.
+  - Expected:
+    - Both engines give `result` `REVIEW`, `fix_cycles` 0 and `detail` exactly `QA_NOT_RUN_DETAIL`, and the summaries are equal.
+    - The raw result's `pending` holds an item with `kind` `qa not run`, `claim` `powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1` and `how_to_check` `run powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1`.
+    - With `blocker_kind` `design` (a variant built in the test), `detail` is `None` and no `qa not run` item exists.
+  - Must not: `detail` `None` in the environment case; a `qa not run` item from a `FAIL` or `PASS` report.
+  - Check: `test_fix_routing.py`.
+  - WP: WP-02
+
+- AC-007 · An environment-blocked QA report is never kept
+  - Scenario: the conformance scenario `QA blocked by the environment is called again after a standards-only fix` (Annex A).
+  - Action: run it in both engines.
+  - Expected: `qa_passes` is `["full", "full"]`, the result is `OK`, and there are 2 `qa:qa` calls in both.
+  - Must not: `["full", "kept"]`. The existing scenario `a standards-only fix keeps the QA report` must still give `["full", "kept"]`.
+  - Check: `test_fix_routing.py`.
+  - WP: WP-02
+
+- AC-008 · `validate` rejects PowerShell prefix rules that run code (issue 118)
+  - Scenario: the manifest of `.claude/bin/test_manifest_check.py` (`MANIFEST`) with one `allow_bash` rule at a time.
+  - Action: `agentic.validate(...)` for each rule.
+  - Expected:
+    - An error containing `too broad` for each of these: `Bash(powershell -NoProfile -NonInteractive -Command Invoke-Pester:*)`, `Bash(pwsh -c Invoke-Pester:*)`, `Bash(C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -Command x:*)`, `Bash(powershell -NoProfile Invoke-Pester:*)`, `Bash(pwsh -EncodedCommand AAAA:*)`, `Bash(powershell -Command x -File y.ps1:*)`, `Bash(pwsh:*)`, `Bash(powershell)`.
+    - No error for any of these: `Bash(powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1:*)`, `Bash(pwsh -f build/Invoke-Tests.ps1:*)`, `Bash(powershell -ExecutionPolicy Bypass -File build/t.ps1:*)`, `Bash(powershell -NoProfile -NonInteractive -Command Invoke-Pester -EnableExit)`.
+    - A verify command `powershell -NoProfile -NonInteractive -Command "Invoke-Pester -EnableExit"` gives no error.
+  - Must not: reject the exact `-Command` rule or the verify command; accept a `-Command` before `-File`.
+  - Check: `test_fix_routing.py`.
   - WP: WP-03
+
+- AC-009 · `sync-permissions` writes only the exact rule for a PowerShell code command and removes the old `:*`
+  - Scenario: the CLI test repo, with `verify.tests` = `powershell -NoProfile -NonInteractive -Command "Invoke-Pester -EnableExit"`. `.claude/settings.local.json` allows `Read` and `Bash(powershell -NoProfile -NonInteractive -Command "Invoke-Pester -EnableExit":*)`.
+  - Action: `agentic.py sync-permissions`, twice.
+  - Expected:
+    - `allow` contains `Read` and `Bash(powershell -NoProfile -NonInteractive -Command "Invoke-Pester -EnableExit")`, and does not contain the `:*` form.
+    - The first run's output contains `removed`.
+    - The second run leaves `allow` unchanged.
+    - The repo's other verify commands keep both forms.
+  - Must not: the `:*` form present after the sync; any other rule removed.
+  - Check: `test_fix_routing.py`.
+  - WP: WP-03
+
+- AC-010 · The warning and the guidance point to a runner script with `-File`
+  - Scenario: the CLI test repo with the verify command of AC-009; the repository's `.claude/rules-library/powershell.md` and `.claude/commands/architect.md`.
+  - Action: `agentic.py validate`; read the two files.
+  - Expected:
+    - `validate` exits 0, and one stdout line starts with `warning:` and contains `Invoke-Pester -EnableExit`, `-File` and `powershell.md`.
+    - `powershell.md` contains `-File build/Invoke-Tests.ps1` and `Bash(powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1:*)`, and does not contain `-Command "Invoke-Pester`.
+    - `architect.md`'s line that starts with ``- **`allow_bash`:**`` contains `-File`.
+  - Must not: the warning for a command without PowerShell.
+  - Check: `test_fix_routing.py`.
+  - WP: WP-03
+
+- AC-011 · Docs, agents' definitions and release 2.21.2
+  - Scenario: the repository's files.
+  - Action: read them.
+  - Expected:
+    - **Release.** `plugin.json` version is `2.21.2`. `upgrade.NOTES["2.21.2"]` is the key right above `"2.21.1"`, with a note containing `@N`, one containing `scope`, one containing `qa not run` and one containing `-File`. `test_acceptance_v221.py` pins `2.21.2`.
+    - **Agents' definitions.** `.claude/agents/qa.md` contains `blocker_kind` and `not_run`. `.claude/agents/reviewer.md` and `.claude/agents/standards-reviewer.md` each contain `one finding per package`.
+    - **Docs.** `docs/how-it-works.md` contains `scope`, `blocker_kind` and `qa not run`. Its line that starts `- **Fix attempt:**` contains `in this run`. The line of `implement.md` that contains `` `qa_passes` `` also contains `environment`.
+  - Must not: `2.21.2` anywhere in `docs/how-it-works.md`.
+  - Check: `test_fix_routing.py`.
+  - WP: WP-04
 
 ### Work packages
 
-#### WP-01 · Headers, failing lines and the GATE line
-- Wave 1.
-- Files: `.claude/bin/verification.py`, `.claude/bin/stage.py`, `.claude/bin/test_failure_lines.py`.
-- Implements: `console_lines`, `failing_lines` in `verify`, the zones in `close_stage`'s `GATE:` line (sections 5 and 6).
-- ACs: AC-001, AC-002, AC-003, AC-004, AC-006.
-- **Patterns to mirror:** `.claude/bin/verification.py:211-229` (`failure_lines`, `scan_lines`: their style and docstrings); `.claude/bin/verification.py:362-372` (the loop that pops `_scan`); `.claude/bin/stage.py:268-271` (the GATE line); `.claude/bin/test_runner_reports.py:207-230` (how a console is scripted and `verify` read).
+#### WP-01 · close-stage numbers a fix attempt as the engine says
+- Wave: 1.
+- Files: `.claude/bin/stage.py`, `.claude/bin/agentic.py` (usage text only), `.claude/bin/test_fix_attempts.py` (new).
+- Implements: `close-stage … ID=state@N … --fix`, `write_fix_diffs`'s placeholder (section 6). Consumes nothing new.
+- ACs: AC-001, AC-002.
+- **Patterns to mirror:**
+  - `.claude/bin/stage.py:236-277`: the parsing loop and its `die` message. Split `state` on `@` after the existing `partition("=")`.
+  - `.claude/bin/stage.py:284-304`: keep the per-package loop and `MAX_DIFF_BYTES`; the early return becomes a placeholder loop.
+  - `.claude/bin/test_agentic.py:572-583`: how a CLI test opens a stage, edits a file and reads the diff.
 - **Gotchas:**
-  - Header check first: a line matching `HEADER_LINE_RE` is handled as a header even when `FAILURE_LINE_RE` also matches it (`Describing AC-603 failure handling`).
-  - A `[-]` line with a trailing duration still matches `FAILURE_LINE_RE`; the duration is stripped later by `normal_failure`, not by `console_lines`.
-  - Lines that are neither a header nor a passing test (`Tests completed in 1s`, an error's stack trace) are kept as today.
-  - The baseline reads `scan_lines` too: a passing header whose words matched `FAILURE_LINE_RE` was in an older baseline's `failures` and is no longer produced. That only removes lines from the current side, so it cannot create a regression.
-  - The GATE line of a stage that closes both a zone and packages is not a case the engines produce; the rule of section 6 still orders it.
-  - `test_guardrail.py:249` asserts no `GATE:` for `close-stage qa QA=pass` with no denial: it stays green only with "above 0".
-  - `test_failure_evidence.py`'s `ReleaseTests` (AC-008) is red until WP-03: expected in wave 1. So is `test_lean.py`'s budget check, if the code exceeds it.
-- **Exact imports and APIs:** `failure_lines`, `normal_failure` already in `verification.py`; `gate_denials` already used in `close_stage`.
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_failure_lines.py"`; `python3 -m unittest discover -s .claude/bin -p "test_runner_reports.py"`; `python3 -m unittest discover -s .claude/bin -p "test_guardrail.py"`; `python3 .claude/bin/agentic.py quality`.
+  - `marks` must keep `(jid, state)` with the bare state: `gate_line` and the ledger read it.
+  - Compute the attempts list once. Today the ledger is read before the update loop and `+ 1` is applied twice, once for the ledger and once for the diffs. With `@N`, both use N.
+  - `@N` without `--fix`, a non-integer or N < 1 is an invalid entry (exit 1, from `die`).
+  - `test_agentic.py:485-490` still expects `fix_count` 2 after two closes without `@N`.
+  - The placeholder is written only for a package with files (as today's loop).
+- **Exact imports and APIs:** `ledger_read`, `ledger_update`, `stage_of`, `entities`, `LEDGER_STATES`, `wps`, `STATE`, `ROOT` already imported in `stage.py`. `git_tree()` at `.claude/bin/stage.py:65`.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`, `python3 .claude/bin/agentic.py quality`.
 
-#### WP-02 · The engines read the failing lines and the zone's denials
-- Wave 1 (it consumes WP-01's output by signature: the keys of section 5 and the GATE line; its scenarios declare that output, they do not run `verify`).
-- Files: `.claude/bin/pipeline.py`, `.claude/workflows/agentic-implement.js`, `.claude/bin/conformance.json`, `.claude/bin/test_pipeline.py`.
-- Implements: section 6's engine contracts; the three scenarios named in AC-005 and AC-007.
-- ACs: AC-005, AC-007.
-- **Patterns to mirror:** `.claude/bin/pipeline.py:280-293` and `.claude/workflows/agentic-implement.js:348-356` (the evidence); `.claude/bin/pipeline.py:470-478` and `.claude/workflows/agentic-implement.js:470-471` (the sum to turn into the helper); `.claude/bin/test_pipeline.py:239-249` (EngineTests: how a scenario's end is asserted).
+#### WP-02 · The engines number fixes, split findings by owner and treat an environment-blocked QA as pending
+- Wave: 1.
+- Files: `.claude/bin/findings.py`, `.claude/bin/pipeline.py`, `.claude/workflows/agentic-implement.js`, `.claude/workflows/pipeline-spec.json`, `.claude/bin/launch.py`, `.claude/bin/conformance.json`, `.claude/bin/test_pipeline.py`, `.claude/bin/test_workflow.mjs`, `.claude/bin/test_owner_split.py` (new).
+- Implements: `split_by_owner`, `qa_environment_blocked`, `qa_not_run_items`, `QA_NOT_RUN_DETAIL`, their JS mirrors, the engines' contract, `pipeline_plan`'s `owners`/`root` and the spec's QA fields. It consumes `close-stage … ID=state@N --fix` by signature (WP-01). The simulated worlds answer every gate with a canned output, so nothing of WP-01 needs to run.
+- ACs: AC-003, AC-004, AC-005, AC-006, AC-007.
+- **Patterns to mirror:**
+  - `.claude/bin/verification.py:277-295`: the path matching (copy the regex, not the criteria part).
+  - `.claude/bin/findings.py:70-94` and `.claude/workflows/agentic-implement.js:236-253`: how a Python helper and its JS mirror sit side by side.
+  - `.claude/bin/pipeline.py:567-609` and `.claude/workflows/agentic-implement.js:568-616`: where the confirmed lists are built.
+  - `.claude/bin/pipeline.py:656-678` and `.claude/workflows/agentic-implement.js:688-712`: the QA modes.
+  - `.claude/workflows/agentic-implement.js:283` and `.claude/workflows/agentic-implement.js:290-295`: the pending item's shape.
+  - `.claude/bin/test_pipeline.py:405-414`: a test reading a named scenario's gates.
 - **Gotchas:**
-  - Use `close_seq` / `closeSeq` at wave 0's close and at both QA closes, replacing `seq` on the same line: no line may be added to `runAfterPlan` or `Pipeline.judge` (section 7).
-  - `seq` can return null when the gatekeeper is lost, and `pipeline.py:368` already reads `close["output"]` without a check: the helpers must not repeat that (a null result adds nothing).
-  - The scenarios are compared by `ConformanceTests` on `prompts`, `gate_denials` and the rest: write each scenario once in `conformance.json`, never per engine. Name them exactly as AC-005 and AC-007 say: the acceptance tests find them by name.
-  - `new_failures` or `failing_lines` may be missing or `[]`; only a non-empty list replaces `tail`.
-  - `agentic-implement.js` must stay within 861 lines and 64 long lines: the new evidence expression at `agentic-implement.js:351` is split over lines of at most 120 characters; line 730 goes over 120 once `seq` becomes `closeSeq`, paid for by line 471 (over 120 today), which the helper call replaces; the helpers' own definition lines stay at 120 or fewer. `pipeline.py` within 800 lines.
-  - `test_pipeline.py`'s `EngineTests` gains the assertions of AC-005 and AC-007 for the fallback engine; `test_workflow.mjs` needs no change (it runs every scenario by name).
-- **Exact imports and APIs:** none new.
-- **WP validation:** `node .claude/bin/test_workflow.mjs`; `python3 -m unittest discover -s .claude/bin -p "test_pipeline.py"`; `python3 .claude/bin/agentic.py quality`.
+  - **The split's place.** Split after verification, on the confirmed list only, so the verifier is called once per original finding (`agents` and `agent_calls` of existing scenarios unchanged).
+  - **Fingerprint collisions.** The fingerprint of a part is computed with its new `file`. Suffix collisions against everything already in that axis's output list.
+  - **Normalising `file`.** The original's `file` can be absolute with backslashes (the real run: `C:\Users\…\XMM.RemoteServices.psm1`). Normalise it the same way as the text before putting it in `scope`.
+  - **Missing plan keys.** `plan.owners`/`plan.root` are absent in every existing scenario's plan. Treat them as `{}`/`""`, so no split and no change to existing summaries.
+  - **The prompt is the same text in both engines.** Python's `compact` and JS's `JSON.stringify` must see the same key order: build the part as `{...f, wp, file, scope, split_from, fingerprint}` in both, deleting `line`.
+  - **The re-review sentence** goes into `pipeline-spec.json`'s `re_review` after `{diffs}`'s sentence and into the workflow's inline prompt at the same place (`.claude/workflows/agentic-implement.js:634-635`). The test of the prompt's head (`.claude/bin/test_workflow.mjs:602-611`) stays green.
+  - **QA mode.** `full` when the standing report is environment-blocked: check it before the `kept` test.
+  - **`detail`** is set only in the "nothing eligible" branch. A later `stop()` overrides it as today.
+  - **Room under the quality ratchet** (4b's last row). `pipeline.py` has 10 lines of room and `Pipeline.judge` 2: put the logic in `findings.py` and keep `judge`'s additions to calls of it. The workflow has 19 lines of room and no new line over 120 characters, and `runAfterPlan` has 2. Put `splitByOwner`, `qaEnvironmentBlocked`, `qaNotRunItems` and `QA_NOT_RUN_DETAIL` at top level next to `fingerprint`, and compact the workflow's own schema literals (`.claude/workflows/agentic-implement.js:25-170`) if room is short, keeping them deep-equal to the spec (`.claude/bin/test_workflow.mjs:587-600`).
+  - **Annex A's scenarios** are added to `conformance.json` verbatim. Their names are what the acceptance tests look up.
+  - **Pinned gate strings.** Update `test_pipeline.py:414` to `close-stage 1 WP-01=blocker@1 --fix` and `test_workflow.mjs:186`/`:422` to `close-stage 1 WP-02=done@1 --fix`.
+- **Exact imports and APIs:**
+  - `from findings import blocks, text_sum, waiver_for, with_fingerprints` plus the new names (`.claude/bin/pipeline.py:19`); `findings.fingerprint`.
+  - `launch.py` already has `wps`, `ROOT` (`from core import …`).
+  - Workflow: `plan` (the parsed JSON, `.claude/workflows/agentic-implement.js:553`).
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`, `node .claude/bin/test_workflow.mjs`, `python3 .claude/bin/agentic.py quality`.
 
-#### WP-03 · Docs, notes and release 2.21.1
-- Wave 2 (the budget is measured after the code).
-- Files: `docs/how-it-works.md`, `.claude/commands/implement.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v221.py`.
-- ACs: AC-008.
-- **Patterns to mirror:** `.claude/bin/upgrade.py:156-161`; `.claude/bin/test_quality_limits.py:158-170` (a fix release's tests: no version pin, the key right above the release it fixes); `docs/how-it-works.md:389`, `docs/how-it-works.md:391`; `.claude/commands/implement.md:71`.
+#### WP-03 · No PowerShell rule runs arbitrary code, and the subset of a suite can be allowed
+- Wave: 1.
+- Files: `.claude/bin/manifest_check.py`, `.claude/bin/installer.py`, `.claude/rules-library/powershell.md`, `.claude/commands/architect.md`, `.claude/bin/test_code_runner_rules.py` (new).
+- Implements: `runs_code`, `open_ended_rule`'s PowerShell case, `OPEN_ENDED`'s additions, `code_runner_commands`, the warning in `complexity_warnings` and `sync_permissions`' change (section 6). Consumes nothing new.
+- ACs: AC-008, AC-009, AC-010.
+- **Patterns to mirror:**
+  - `.claude/bin/manifest_check.py:39-60`: how a rule's prefix is tokenised and judged.
+  - `.claude/bin/manifest_check.py:78-97`: a warning's wording.
+  - `.claude/bin/installer.py:115-129`: the settings file's read/modify/write and its print.
+  - `.claude/bin/test_manifest_check.py:27-37`: a table of commands with `subTest`.
 - **Gotchas:**
-  - `test_acceptance_v221.py`: change only `"2.21.0"` to `"2.21.1"` in its `plugin["version"]` assertion; its other checks stay.
-  - `implement.md`'s line says how to read a zone's count: an `AT` or `QA` with denials means the test-author or QA was held to the quality limits of its own files.
-  - `flow-budget.json`: raise only what is exceeded, with its why.
-  - `implement.md` is pinned by `test_quality_limits.py:150-155` (exactly one line with `` `zone_suspects` ``) and `test_definitions.py:231-235` (`` `gate_denials` ``): extend line 71, add no line mentioning `zone_suspects`.
-  - `.claude/flow-history.json` is regenerated by the maintainer as the last commit, not by this package.
-- **WP validation:** the five commands of section 3 and `python3 -m unittest discover -s acceptance`.
+  - **Tokenising.** `open_ended_rule` today splits on spaces. Use `shlex.split` for `runs_code` (falling back to `.split()` on `ValueError`), so a quoted Windows path stays one token.
+  - **Order of flags.** A `-Command` before `-File` runs code: `-File`'s script receives nothing.
+  - **Where `code_runner_commands` lives.** It belongs in `manifest_check.py`, and `installer.py` imports it the way it imports from `core` (check `installer.py`'s import list at the top: add `from manifest_check import code_runner_commands`). Running `python3 .claude/bin/agentic.py sync-permissions` must keep working, so check there is no import cycle.
+  - **The runner script in `powershell.md`** is an example the project writes in its own repo. Show it whole, under 15 lines: `param([string[]]$Path = '.')`, then `Invoke-Pester -Path $Path -EnableExit -OutputFile test-results.xml -OutputFormat NUnitXml`. Show the verify line and the `allow_bash` rule for it, and say why `-Command` is exact-only. Pester 3.4 and 5 accept `-Path`, `-EnableExit` and `-OutputFormat NUnitXml` in their legacy parameter set (not measured here: section 11).
+  - **`architect.md`'s bullet** must still contain "Minimal and concrete" (the plan-review prompt quotes it). Add: every command a package's validation runs needs a prefix rule that covers it, and PowerShell uses `-File`.
+- **Exact imports and APIs:** `shlex` (already imported in `manifest_check.py`), `json`, `ROOT` (in `installer.py`).
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`, `python3 .claude/bin/agentic.py quality`.
+
+#### WP-04 · Docs, agents' definitions and release 2.21.2
+- Wave: 2, depends on WP-01, WP-02 and WP-03. `flow-budget.json` measures the code the other packages wrote, and the docs describe it as built.
+- Files: `docs/how-it-works.md`, `docs/how-to/README.md`, `.claude/commands/implement.md`, `.claude/agents/qa.md`, `.claude/agents/reviewer.md`, `.claude/agents/standards-reviewer.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v221.py`.
+- Implements: nothing callable. Consumes every contract of section 6 by implementation.
+- ACs: AC-011.
+- **Patterns to mirror:**
+  - `.claude/bin/upgrade.py:156-163`: a fix release's notes, right above the previous key.
+  - `.claude/bin/test_acceptance_v221.py:138-145`: the pin.
+  - `docs/how-it-works.md:392`: a one-line fact per bullet.
+  - `.claude/agents/qa.md:67`: the status line to extend.
+- **Gotchas:**
+  - **QA's definition.** Explain when `blocker_kind` is `environment` (a command refused, a tool missing, the suite will not start for reasons outside the code) and when it is `design`, and that `not_run` lists the exact commands.
+  - **Both reviewers' definitions.** Say "one finding per package": a breach that spans files owned by different packages is reported once per owning package, each with its own `wp` and `file`.
+  - **`docs/how-it-works.md:392`** becomes "N is the attempt number in this run".
+  - **`flow-budget.json`:** raise only what is exceeded (run `python3 -m unittest discover -s .claude/bin -p test_lean.py`), with its why.
+  - **`implement.md`** is pinned by `test_quality_limits.py` and `test_definitions.py` (`zone_suspects`, `gate_denials`). Extend the `qa_passes` line (59) and the status line (51); add no new line mentioning those.
+  - **`.claude/flow-history.json`** is regenerated by the maintainer as the last commit, not by this package.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`, `python3 .claude/bin/agentic.py quality`, `python3 -m unittest discover -s acceptance`.
 
 ```json wp-manifest
 {
   "maintainer": true,
   "stack": ["python", "typescript"],
-  "allow_bash": ["Bash(python3 -m unittest:*)", "Bash(node .claude/bin/test_workflow.mjs)", "Bash(python3 .claude/bin/agentic.py quality)"],
-  "acceptance": {"files": [".claude/bin/test_failure_evidence.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_failure_evidence.py"},
+  "allow_bash": ["Bash(python3 -m unittest:*)", "Bash(node .claude/bin/test_workflow.mjs:*)", "Bash(python3 .claude/bin/agentic.py quality)"],
+  "acceptance": {"files": [".claude/bin/test_fix_routing.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_fix_routing.py"},
   "verify": {"build": "python3 -m unittest discover -s bench -p \"test_*.py\"", "lint": "node .claude/bin/test_workflow.mjs", "types": "python3 -m unittest discover -s bench/acceptance", "tests": "python3 -m unittest discover -s .claude/bin -p \"test_*.py\""},
   "docs": {"files": ["docs/assets/"], "codemap": null},
   "work_packages": [
-    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/verification.py", ".claude/bin/stage.py", ".claude/bin/test_failure_lines.py"],
-     "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-006"], "mirror": [".claude/bin/verification.py:211-229", ".claude/bin/verification.py:362-372", ".claude/bin/stage.py:268-271", ".claude/bin/test_runner_reports.py:207-230"]},
-    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/pipeline.py", ".claude/workflows/agentic-implement.js", ".claude/bin/conformance.json", ".claude/bin/test_pipeline.py"],
-     "acs": ["AC-005", "AC-007"], "mirror": [".claude/bin/pipeline.py:280-293", ".claude/workflows/agentic-implement.js:348-356", ".claude/bin/pipeline.py:470-478", ".claude/bin/test_pipeline.py:239-249"]},
-    {"id": "WP-03", "wave": 2, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", ".claude/commands/implement.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v221.py"],
-     "acs": ["AC-008"], "mirror": [".claude/bin/upgrade.py:156-161", ".claude/bin/test_quality_limits.py:158-170", "docs/how-it-works.md:389", ".claude/commands/implement.md:71"]}
+    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/stage.py", ".claude/bin/agentic.py", ".claude/bin/test_fix_attempts.py"],
+     "acs": ["AC-001", "AC-002"], "mirror": [".claude/bin/stage.py:236-277", ".claude/bin/stage.py:284-304", ".claude/bin/test_agentic.py:572-583"]},
+    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/findings.py", ".claude/bin/pipeline.py", ".claude/workflows/agentic-implement.js", ".claude/workflows/pipeline-spec.json", ".claude/bin/launch.py", ".claude/bin/conformance.json", ".claude/bin/test_pipeline.py", ".claude/bin/test_workflow.mjs", ".claude/bin/test_owner_split.py"],
+     "acs": ["AC-003", "AC-004", "AC-005", "AC-006", "AC-007"], "mirror": [".claude/bin/verification.py:277-295", ".claude/bin/findings.py:70-94", ".claude/workflows/agentic-implement.js:236-253", ".claude/bin/pipeline.py:567-609", ".claude/workflows/agentic-implement.js:568-616", ".claude/bin/pipeline.py:656-678", ".claude/workflows/agentic-implement.js:688-712", ".claude/bin/test_pipeline.py:405-414"]},
+    {"id": "WP-03", "wave": 1, "depends_on": [], "files": [".claude/bin/manifest_check.py", ".claude/bin/installer.py", ".claude/rules-library/powershell.md", ".claude/commands/architect.md", ".claude/bin/test_code_runner_rules.py"],
+     "acs": ["AC-008", "AC-009", "AC-010"], "mirror": [".claude/bin/manifest_check.py:39-60", ".claude/bin/manifest_check.py:78-97", ".claude/bin/installer.py:115-129", ".claude/bin/test_manifest_check.py:27-37"]},
+    {"id": "WP-04", "wave": 2, "depends_on": ["WP-01", "WP-02", "WP-03"], "files": ["docs/how-it-works.md", "docs/how-to/README.md", ".claude/commands/implement.md", ".claude/agents/qa.md", ".claude/agents/reviewer.md", ".claude/agents/standards-reviewer.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v221.py"],
+     "acs": ["AC-011"], "mirror": [".claude/bin/upgrade.py:156-163", ".claude/bin/test_acceptance_v221.py:138-145", "docs/how-it-works.md:392", ".claude/agents/qa.md:67"]}
   ]
 }
 ```
 
 ## 9. Test strategy
 
-- **Acceptance** (`test_failure_evidence.py`, written first and red): AC-001 to AC-004 and AC-006 run `agentic.py` (`verify`, `hook`, `close-stage`) in temporary repos with scripted consoles; AC-005 and AC-007 run the named conformance scenarios through `test_pipeline.run_scenario` and compare with `test_workflow.mjs --dump` (skipped without `node`, as `ConformanceTests` is); AC-008 reads files. Nothing is spent.
-- **Unit:** `test_failure_lines.py` covers `console_lines` directly (no header, a header with no test under it, nested `Context`, two failures under one header kept once, a header at the end of the output, a summary line, a `[-]` line that contains `Errors: 0`, a `[-]` at the `Describing` level after a `Context`) and the GATE line's ordering.
-- **Teeth:** each behaviour is broken once by hand (headers kept as today; `failing_lines` not set on the acceptance phase; the evidence from `tail`; the zone sum skipped in one engine) and an acceptance test must fail.
-- **By hand, before the pull request:** the reproduction of this session (three packages suspected today) run again, giving `{}`; `acceptance/`, `qa/`, the installed-project job, and `agentic.py flow-history` as the last commit with its `--check`.
+- **Acceptance** (`test_fix_routing.py`, written first and red):
+  - AC-001 and AC-002 run `agentic.py` in the CLI test repo of `test_agentic.py`.
+  - AC-003 to AC-007 run the named conformance scenarios through `test_pipeline.run_scenario`, and through `test_workflow.mjs --dump` (skipped without `node`), plus direct calls to `findings.split_by_owner`.
+  - AC-008 to AC-010 call `agentic.validate` and the CLI.
+  - AC-011 reads files.
+  - Nothing is spent.
+- **Unit tests:**
+  - `test_fix_attempts.py`: `@N` parsing, the ledger value and the placeholder.
+  - `test_owner_split.py`: directories, root stripping, backslashes, ordering, collisions, non-string fields and the QA helpers. It also checks that the JS mirror gives the same output on the same table, by running `node` on a small script that loads the workflow's functions the way `test_workflow.mjs` does, or by adding the cases to `test_workflow.mjs`.
+  - `test_code_runner_rules.py`: a `runs_code` table (abbreviations, `/` flags, `.exe` and paths, the order of `-File` and `-Command`), `sync_permissions` idempotence.
+- **Conformance:** the four scenarios of Annex A, compared key by key by `ConformanceTests`.
+- **Teeth:** each behaviour is broken once by hand, and an acceptance test must fail:
+  - the ledger + 1 used instead of `@N`;
+  - no split in one engine;
+  - `kept` for an environment `BLOCKER`;
+  - the PowerShell check removed.
+- **By hand, before the pull request:** `acceptance/`, `qa/`, `bench/`, and `agentic.py flow-history` as the last commit with its `--check`.
 
 ## 10. Decisions
 
 | Decision | Discarded | Why |
 |---|---|---|
-| A Pester header is kept only when a failure follows it in its block | Drop every header; or attribute criteria only from failing lines | Dropping every header loses the criterion of a real failure whose `It` name has none (the run's `FeatureFlagList AC-001` case). Reading criteria only from failing lines would break runners whose detail lines carry the name (Jest-style blocks, pytest's tracebacks). The narrow rule changes only what a header of passing tests contributes |
-| The headers are recognised by `Describing`/`Context` at the line's start | A general "block header" detector | Those are the lines the run showed; other runners mark a block differently and were not reported. Section 11 |
-| `failing_lines` on every blocking phase | `new_failures` only (the request's first wording) | The user chose to extend it: the acceptance phase has no `tail` and the run's BLOCKED package had no lines at all |
-| The key is `failing_lines` | `failures` | The baseline already uses `failures` for the full list it compares; one name, one meaning |
-| Evidence: `new_failures`, else `failing_lines`, else `tail` | Concatenate them | A regression's new lines are the ones that say who broke something; the old ones belong to nobody (the rule `verify` already applies to suspects) |
-| Zones in the `GATE:` line and in `gate_denials`, reversing design 0003 (`docs/architecture/0003-stop-gate-statuses.md:140`, `:197`: judge ids never listed) and design 0029 (`docs/architecture/0029-zone-stop-gate.md:257`: zones left out to avoid an engine change) | Keep both decisions | 0029 left them out only to avoid touching the engines; the real run showed nobody can tell whether the zone gate acted. 0003's reason (judges have no acceptance gate) ended when 0029 gave `AT` and `QA` one. `REVIEW` and `DOCS` stay unlisted |
-| A summary line keeps no header | Treat it as any failing line | `Tests Passed: 2, Failed: 1` contains `Failed`: it would keep the last block's header whatever passed (found by the plan review) |
-| `close_seq` replaces `seq` at the closes | Add a call after each close | Two functions are at their recorded size allowance |
-| Zone counts in the GATE line only above 0 | Always print them | A test pins no GATE line for a QA stage without denials, and an engine reading `QA=0` would add nothing |
-| The engines read the zone's denials into `gate_denials` | Leave the line only in `stages[].check` | QA's close output is not kept anywhere in the result; without the engine change QA's denials stay invisible. Chosen with the user ("record the denials of AT and QA") |
-| Contracts first: WP-01 and WP-02 in the same wave | WP-02 after WP-01 | The engines only read declared outputs in their scenarios; nothing of WP-01 needs to run for WP-02 |
-| A new acceptance file, the 2.21.0 file keeps only a bumped pin | Rewrite `test_acceptance_v221.py` | The fix-release pattern since 2.20.1 |
-| No change to `own_failure` | Show the failing line under a package's header | Not reported as a defect; the gate's message names the criterion and the agent can run its tests. Section 11 |
+| The engine passes the attempt number (`ID=state@N`) | Reset the ledger's `fix_count` and delete old diffs at `pipeline-plan` | Two counters that must agree by convention broke once already. The engine knows the number it put in the prompt, so it names the file. A reset would also need care with `--resume` and the manual `run-wave --fix` cap |
+| `@N` only with `--fix`; no `@N` keeps today's behaviour | Make `@N` mandatory with `--fix` | The manual stage-by-stage commands and their tests use `--fix` alone |
+| Placeholder diff instead of an early return | Keep the early return | An early return leaves whatever an earlier run wrote under that number |
+| Split confirmed findings by the files their evidence/fix names (user's choice) | Reviewer prompt only; a third re-review verdict that reroutes | The prompt is not enforced. A reroute verdict spends a fix cycle before the right package is asked. The split is deterministic and reuses `attribute`'s matching |
+| Split after verification | Split before verifying | The verifier would be called once per part: more calls and no new evidence |
+| A part's `scope` and one sentence in the re-review prompt | A per-part re-review schema | The re-reviewer only needs to know where to look. Schemas stay as they are |
+| `owners`/`root` in the plan, the JS mirror beside `fingerprint` | A gatekeeper step that splits | A gatekeeper call costs an agent call and a step, and the workflow already mirrors `findings.py` |
+| QA environment blocker stays `REVIEW`, explained in `detail` and pending (user's choice) | `OK` when verification is green | QA's validation did not happen; `OK` would claim it did |
+| `blocker_kind` and `not_run` optional | Required | A QA agent of an older definition still validates; absent means `design`, which is today's behaviour |
+| Reject `powershell`/`pwsh` prefix rules without `-File` first (user's choice) | Warn only | `-Command X:*` lets an agent run any code: the same class as `Bash(python3:*)`, already rejected |
+| Do not reject a verify or acceptance command that uses `-Command` | Reject it | The flow runs it exactly, and the PowerShell pack recommended it until now. `sync-permissions` makes it exact-only, and `validate` warns |
+| `sync-permissions` removes only the `:*` form of the current code commands | Scan and clean every rule | It removes only what it would have written; the user's own rules are theirs (an invalid one in `allow_bash` is already a `validate` error) |
+| The warning in `complexity_warnings` | A new warnings function printed by `agentic.py` | No change to `agentic.py` by WP-03 (WP-01 owns it). The function's docstring is widened |
+| Patch release 2.21.2 (user's choice) | 2.22.0 | Bug fixes, and the QA schema gains optional fields only |
+| Contracts first: WP-01, WP-02 and WP-03 in wave 1 | WP-02 after WP-01 | The engines' scenarios answer `close-stage` with canned output; nothing of WP-01 needs to run |
+| WP-04 in wave 2 | Wave 1 | The budget measures the code written, and the docs describe it as built |
 
 ## 11. Risks and open questions
 
-- **Pester's exact console is not measured.** The header rule follows Pester 4 and 5's documented `Describing`/`Context` lines and the run's agents' quotes. If a project's Pester prints another header word (a localised build, `Describe` without `-ing`, a custom formatter), its headers are kept as today. The robust path stays the one the flow already has: `reports` with NUnitXml.
-- **Other console lines can still carry an AC.** A `Running tests from '…AC-601.Tests.ps1'` line is not a header and is kept. Not seen in the run; not handled.
-- **The gate's message for a real failure under a header** shows the header (the line with the marker), not the `[-]` line under it (`own_failure`, `.claude/bin/stage.py:310-323`). Unchanged by this design.
-- **A header after a regression.** A regression's scan keeps only its new failing lines (`.claude/bin/verification.py:350`), so a Pester header that names a criterion does not attribute a regression; the package is found only through a file or a criterion in the failing line itself. Unchanged by this design.
-- **Blocks end by header, not by indentation.** A `[-]` printed at the `Describing` level after a `Context` is counted inside that `Context` and keeps its header too. Not seen in the run; `test_failure_lines.py` pins the behaviour so a later change is deliberate.
-- **The project's own fix** (its `reports`, `FeatureFlagList AC-001` in its 4b, `XMM-Panel.ps1`'s encoding) is the user's, outside the flow.
+- **Auto mode and allow rules.** Not reproduced: no Windows session with auto mode here. The design assumes an allow rule that matches the command lets it run without the classifier. If the classifier still refuses matched commands, issue 142's pending items will say so, and issue 118 stays open for that part.
+- **Pester's parameters in the runner example** (`-Path`, `-EnableExit`, `-OutputFormat NUnitXml` in Pester 3.4 and 5) are not measured here, so the example is marked as such in `powershell.md`.
+- **PowerShell's own parsing of abbreviations** is wider than the rule's (for example `-co` is ambiguous in `pwsh`). The rule errs toward rejecting. A legitimate rule that is rejected can always be rewritten with `-File`.
+- **Basenames in evidence.** A reviewer who quotes `x.py:3` for `src/b/x.py` does not trigger a split (whole-path matching, as `attribute`). The reviewers' definitions ask for paths, and the real run quoted root-level files by name, which are whole paths.
+- **Room under the quality ratchet** is tight in both engines (4b). WP-02 may need to compact its own schema literals.
 
 No question blocks a WP.
+
+## Annex A · Conformance scenarios
+
+Added to `.claude/bin/conformance.json`'s `scenarios`, verbatim (key order free):
+
+```json
+{"name": "a finding that names another package's files is split",
+ "plan": {"owners": {"WP-01": ["src/a.py"], "WP-02": ["src/b/"], "WP-03": ["src/c.py"]}, "root": "/repo"},
+ "standards": [{"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+   {"wp": "WP-01", "file": "/repo/src/a.py", "line": 3, "problem": "SPLIT-PROBLEM", "evidence": "src/a.py:3 `x = 255`; src/c.py:7 `y = 255`",
+    "fix": "one named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]},
+   {"status": "PASS", "axis": "standards", "findings": [], "not_checked": []}]}
+
+{"name": "QA blocked by the environment is pending, not a verdict",
+ "qa": [{"status": "BLOCKER", "blocker_kind": "environment", "not_run": ["powershell -NoProfile -NonInteractive -File build/Invoke-Tests.ps1"],
+         "plan": [], "defects": [], "gaps": ["the permission classifier denied the test command"], "needs_validation": []}]}
+
+{"name": "QA blocked by the environment is called again after a standards-only fix",
+ "standards": [{"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+   {"wp": "WP-02", "file": "src/b/x.py", "line": 3, "problem": "STANDARDS-PROBLEM", "evidence": "e", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]},
+   {"status": "PASS", "axis": "standards", "findings": [], "not_checked": []}],
+ "qa": [{"status": "BLOCKER", "blocker_kind": "environment", "not_run": ["pytest"], "plan": [], "defects": [], "gaps": [], "needs_validation": []},
+        {"status": "PASS", "plan": [], "defects": [], "gaps": [], "needs_validation": []}]}
+```
+
+`a defect that does not get fixed is capped` (AC-003) already exists and is not changed.
