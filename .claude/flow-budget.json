@@ -1,5 +1,5 @@
 {
-  "code_lines": 7553,
-  "prompt_bytes": 99948,
-  "why": "2.21.0 (issue 134): +51 lines for the stop gate's zone check (the test-author and QA held to the quality limits of their own files) and its note"
+  "code_lines": 7627,
+  "prompt_bytes": 100047,
+  "why": "2.21.1 (design 0030): +74 code lines for Pester headers read only above a failure, failing_lines as a fix's evidence in both engines and the zone gate's denials in the run's record; +99 prompt bytes for /implement's gate_denials line"
 }
