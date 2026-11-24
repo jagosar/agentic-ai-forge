@@ -139,7 +139,7 @@ class PackageGateTests(GateCase):
 class ReleaseTests(unittest.TestCase):
     def test_ac_007_release_2_21_0(self):
         plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.21.1")
+        self.assertEqual(plugin["version"], "2.21.2")
         import upgrade
         notes = upgrade.NOTES["2.21.0"]
         self.assertTrue(any("stop gate" in n and "test-author" in n for n in notes), notes)

@@ -201,7 +201,7 @@ python3 bench/bench.py ab --a <ref> --b <ref>          # compares two versions o
 
 - **Exit codes:** `0` all good, `1` usage error or invalid manifest, `3` needs review, `4` the fix-cycle limit was reached.
 - **Each agent's report** (fallback mode): `.claude/state/runs/<ID>.json` (field `structured_output`) and `<ID>.log`. `run-pipeline` saves the run's result in `.claude/state/runs/workflow-result.json`.
-- **What a fix attempt changed:** `.claude/state/runs/<ID>.fix-N.diff`, which the next attempt reads.
+- **What a fix attempt changed:** `.claude/state/runs/<ID>.fix-N.diff`, which the next attempt reads (N is the attempt in this run).
 
 ## Troubleshooting
 
