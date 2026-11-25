@@ -47,7 +47,7 @@ SOURCE_RANK = {"one-off": 2, "per-agent": 1, "record": 0}
 SEQ_OUTPUT_CAP = 12_000
 
 SEQ_COMMANDS = {"pipeline-plan", "briefs", "baseline", "open-stage", "close-stage", "verify", "codemap", "docs-check",
-                "acceptance", "callers", "hooks-check"}
+                "acceptance", "callers", "hooks-check", "pinned"}
 
 PIPELINE_STATE = STATE / "pipeline.json"
 
