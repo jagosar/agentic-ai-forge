@@ -1,9 +1,9 @@
-"""Acceptance tests of agentic-flow 2.21.0: AC-001 .. AC-007 of docs/architecture/0029 (issue 134). The stop gate
-also holds the test-author and QA to the quality limits of the files of their own zone: a finished report is refused
-with the violation lines, at most twice, and never for somebody else's files, an unfinished report or a baseline that
-cannot be read.
+"""Tests of design 0029 (issue 134, agentic-flow 2.21.0), moved from its acceptance file when 2.22.0 shipped: the stop
+gate also holds the test-author and QA to the quality limits of the files of their own zone. A finished report is
+refused with the violation lines, at most twice, and never for somebody else's files, an unfinished report or a
+baseline that cannot be read.
 
-Run: python3 -m unittest discover -s .claude/bin -p test_acceptance_v221.py
+Run: python3 -m unittest discover -s .claude/bin -p test_zone_stop_gate.py
 The real hook runs in temporary repos with a real quality baseline. Nothing is spent.
 """
 import json
@@ -12,12 +12,9 @@ import unittest
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
-ROOT = BIN.parents[1]
 sys.path.insert(0, str(BIN))
-import core  # noqa: E402
 from test_agentic import MANIFEST, Repo  # noqa: E402
 
-FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own repo")
 LONG_LINE = "x = '" + "a" * 125 + "'\n"  # 131 characters: over the default limit of 120
 ACCEPTANCE_FILE = "acceptance/test_money.py"
 QA_FILE = "qa/test_qa.py"
@@ -133,27 +130,6 @@ class PackageGateTests(GateCase):
         self.assertEqual(self.report(repo, "WP-01", "DONE").returncode, 0, "its acceptance tests pass")
         self.assertEqual(self.report(repo, "REVIEW", "PASS").returncode, 0)
         self.assertEqual(self.gate(repo), {})
-
-
-@FLOW_REPO_ONLY  # it reads this repository's docs and release files
-class ReleaseTests(unittest.TestCase):
-    def test_ac_007_release_2_21_0(self):
-        plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.21.2")
-        import upgrade
-        notes = upgrade.NOTES["2.21.0"]
-        self.assertTrue(any("stop gate" in n and "test-author" in n for n in notes), notes)
-        keys = list(upgrade.NOTES)
-        self.assertEqual(keys[keys.index("2.21.0") + 1], "2.20.2")
-        works = (ROOT / "docs/how-it-works.md").read_text(encoding="utf-8")
-        gate = next(line for line in works.splitlines() if line.startswith("- **Stop gate:**"))
-        self.assertIn("test-author", gate)
-        self.assertIn("QA", gate)
-        self.assertNotIn("2.21.0", works)
-        self.assertEqual(sorted(p.name for p in BIN.glob("test_acceptance*.py")), ["test_acceptance_v221.py"])
-        moved = (BIN / "test_native_usage.py").read_text(encoding="utf-8")
-        for name in ("UsageOfARunTests", "SaveResultTests", "NativeRulesTests", "DefinitionTests"):
-            self.assertIn(f"\nclass {name}(", moved)
 
 
 if __name__ == "__main__":
