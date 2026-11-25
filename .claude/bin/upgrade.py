@@ -153,6 +153,15 @@ NOTES = {
         "A workflow-subagent (the type the Workflow tool's subagents may carry; not verified) cannot write files "
         "before it claims its zone. Bash stays open, so a gatekeeper with that type keeps working.",
     ],
+    "2.22.1": [
+        "A Standards finding that an acceptance test pins no longer burns the fix cycles (issue 145). After each "
+        "review, `agentic.py pinned` checks every confirmed reflex finding that has a line: when an acceptance test "
+        "that reads the finding's file as text holds a literal found on that line, the finding leaves the fix queue "
+        "and becomes a pending item of type `acceptance conflict`, which names the test and ends the run in REVIEW. "
+        "The step fails open: if it cannot answer, nothing is pinned.",
+        "The test-author is told not to assert on source text the behaviour can show, and never to pin a form "
+        "section 7 forbids; the test-auditor reports such a test as high.",
+    ],
     "2.22.0": [
         "The implementer and the test-author read the language rules and the quality limits, whole, at the end of "
         "their brief: `agentic.py briefs` writes them from disk. In the workflow their prompts no longer carry the "
