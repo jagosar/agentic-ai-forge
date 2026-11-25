@@ -633,6 +633,18 @@ test('the constants of the workflow are the ones in pipeline-spec.json', async (
   assert.equal(spec.constants.audit_rounds, 2, 'the workflow allows one revision of the acceptance tests')
 })
 
+test('a pinned finding becomes an acceptance conflict item with its test and its decision', async () => {
+  const decl = conformance.scenarios.find(d => d.name === 'a reflex finding pinned by an acceptance test goes to pending')
+  const { result } = await simulate(fromDecl(decl), decl.args || {})
+  const item = result.pending.find(p => p.type === 'acceptance conflict')
+  assert.deepEqual(item.pinned_by, { test: 'acceptance/test_x.py', test_line: 12, text: 'limit(10000' })
+  assert.equal(item.tier, 'reflex')
+  assert.equal(item.wp, 'WP-02')
+  assert.match(item.decision, /^the fix would break the acceptance test that pins this line's text/)
+  assert.deepEqual(result.review.standards.confirmed, [])
+  assert.equal(result.review.standards.pinned.length, 1)
+})
+
 test('every conformance scenario ends as described in its name', async () => {
   const byName = Object.fromEntries(conformance.scenarios.map(d => [d.name, d]))
   const run1 = async name => summarize(await simulate(fromDecl(byName[name]), byName[name].args || {}))

@@ -2286,6 +2286,195 @@
           "output": "RESULT: REVIEW"
         }
       ]
+    },
+    {
+      "name": "a reflex finding pinned by an acceptance test goes to pending",
+      "plan": {
+        "root": "/repo"
+      },
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-02",
+              "file": "/repo/src/b/x.py",
+              "line": 3,
+              "problem": "PINNED-PROBLEM",
+              "evidence": "x = limit(10000)",
+              "fix": "a named constant",
+              "if_skipped": "drift",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        }
+      ],
+      "gate_fail": [
+        {
+          "prefix": "pinned",
+          "exit_code": 0,
+          "output": {
+            "pinned": [
+              {
+                "file": "src/b/x.py",
+                "line": 3,
+                "test": "acceptance/test_x.py",
+                "test_line": 12,
+                "text": "limit(10000"
+              }
+            ],
+            "skipped": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a pinned step that cannot answer leaves the finding to be fixed",
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-02",
+              "file": "src/b/x.py",
+              "line": 3,
+              "problem": "PINNED-PROBLEM",
+              "evidence": "x = limit(10000)",
+              "fix": "a named constant",
+              "if_skipped": "drift",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        },
+        {
+          "status": "PASS",
+          "axis": "standards",
+          "findings": [],
+          "not_checked": []
+        }
+      ],
+      "gate_fail": [
+        {
+          "prefix": "pinned",
+          "exit_code": 1,
+          "output": "boom"
+        }
+      ]
+    },
+    {
+      "name": "only reflex findings with a line are checked for pins",
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-02",
+              "file": "src/b/x.py",
+              "line": 3,
+              "problem": "FINISH-NOTE",
+              "evidence": "e",
+              "fix": "f",
+              "if_skipped": "s",
+              "provenance": "read",
+              "tier": "finish",
+              "rule": "No magic numbers"
+            },
+            {
+              "wp": "WP-02",
+              "file": "src/b/y.py",
+              "problem": "NO-LINE",
+              "evidence": "e",
+              "fix": "f",
+              "if_skipped": "s",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            },
+            {
+              "wp": "WP-02",
+              "file": "src/b/a b.py",
+              "line": 3,
+              "problem": "SPACED-PATH",
+              "evidence": "e",
+              "fix": "f",
+              "if_skipped": "s",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        },
+        {
+          "status": "PASS",
+          "axis": "standards",
+          "findings": [],
+          "not_checked": []
+        }
+      ]
+    },
+    {
+      "name": "a pinned finding is not re-reviewed and stays pending",
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-02",
+              "file": "src/b/x.py",
+              "line": 3,
+              "problem": "PINNED-PROBLEM",
+              "evidence": "x = limit(10000)",
+              "fix": "a named constant",
+              "if_skipped": "drift",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            },
+            {
+              "wp": "WP-02",
+              "file": "src/b/x.py",
+              "line": 9,
+              "problem": "FIXED-PROBLEM",
+              "evidence": "y = 255",
+              "fix": "a named constant",
+              "if_skipped": "drift",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        }
+      ],
+      "gate_fail": [
+        {
+          "prefix": "pinned",
+          "exit_code": 0,
+          "output": {
+            "pinned": [
+              {
+                "file": "src/b/x.py",
+                "line": 3,
+                "test": "acceptance/test_x.py",
+                "test_line": 12,
+                "text": "limit(10000"
+              }
+            ],
+            "skipped": []
+          }
+        }
+      ]
     }
   ]
 }

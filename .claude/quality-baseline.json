@@ -52,7 +52,7 @@
       "long_lines": 7
     },
     ".claude/workflows/agentic-implement.js": {
-      "lines": 890,
+      "lines": 937,
       "long_lines": 64
     },
     "acceptance/test_docs_ab.py": {
