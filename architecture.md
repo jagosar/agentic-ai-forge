@@ -126,6 +126,9 @@ PIN_CODE_CHARS = "()[]{}=;"  # a fragment must hold one: it is code text, not a 
 PIN_WINDOW = 1              # lines around the finding's line that are searched
 PIN_MAX_BYTES = 262144      # a larger acceptance file is not read
 PIN_TEXT_MAX = 160          # characters of the fragment reported
+# A test file that reads a file as text: only such a file can pin the source's text (a behavioural test cannot).
+PIN_READ_RE = re.compile(r"Get-Content|ReadAll(?:Text|Lines)|read_text|readFileSync|readFile|ReadFile|readString"
+                         r"|readAllLines|file_get_contents|File\.read|\bopen\(")
 EMPTY_PINNED = {"pinned": [], "skipped": []}
 ```
 
@@ -153,7 +156,8 @@ A pinned finding: the finding with `"pinned_by": {"test", "test_line", "text"}`.
 - **An argument** is split at its last `:`. It is skipped (listed in `skipped`, once, in argument order) when the path does not fully match `PIN_PATH`, has a segment `.` or `..`, the line part does not fully match `[1-9][0-9]*`, or `ROOT / path` is not a file. The source file is read with the same rules as the tests (UTF-8 with `errors="replace"`, `\r` stripped; larger than `PIN_MAX_BYTES`: skipped). A test file that is the finding's own file is not searched for that argument (a test never pins itself). A repeated argument is ignored after its first appearance.
 - **The tests**: the files of `source_files()` owned by any pattern of `at_entity(load_manifest())["files"]` (`owns`), in sorted order, each at most `PIN_MAX_BYTES` bytes (larger ones are left out), read as UTF-8 with `errors="replace"`, split on `\n` with `\r` stripped.
 - **`pin_fragments(line) -> list[str]`** (pure): for each match, in order, of `'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"` in the line, its content is split on `\.\*\??|\.\+\??|\\[sSdDwW][*+?]?|[*^$]`; each piece has `\\(.)` replaced by the character, is stripped of whitespace, and is kept when it has at least `PIN_MIN_CHARS` characters and contains at least one character of `PIN_CODE_CHARS`. `'ShowBalloonTip\(10000'` gives `["ShowBalloonTip(10000"]`; `'*Get-Item -Path*'` gives `[]` (no code character); `"a(b"` gives `[]` (too short).
-- **`find_pins(path, line, tests) -> dict | None`** (pure over text): `tests` is `[(test_path, [lines])]`. The source window is lines `max(1, line - PIN_WINDOW) .. line + PIN_WINDOW` of `path` (those that exist). The answer is the first `(test_path, test_line, fragment)`, in the order test path, test line ascending, fragment order, whose fragment occurs as a substring of a window line; `text` is the fragment cut to `PIN_TEXT_MAX` characters. `None` when nothing matches.
+- **Which tests can pin a path:** a test file counts for an argument only when its text matches `PIN_READ_RE` (it reads some file as text) and contains the argument's file name (the last path segment, compared case-insensitively). Other test files are not searched for that argument.
+- **`find_pins(path, line, tests) -> dict | None`** (pure over text): `tests` is `[(test_path, [lines])]`, already reduced to the files that can pin `path`. The source window is lines `max(1, line - PIN_WINDOW) .. line + PIN_WINDOW` of `path` (those that exist). The answer is the first `(test_path, test_line, fragment)`, in the order test path, test line ascending, fragment order, whose fragment occurs as a substring of a window line; `text` is the fragment cut to `PIN_TEXT_MAX` characters. `None` when nothing matches.
 - `pinned` lists at most one pin per argument, in argument order.
 
 ### C2 · `findings.py` (WP-02; mirrored in the workflow)
@@ -220,17 +224,17 @@ At the start of `closeReview(byAxis)` (JS) and `close_review(by_axis)` (Python),
   - Check: `test_pinned_conflict.py`, AC-004 tests.
   - WP: WP-02
 - AC-005 · `pinned` finds a literal of an acceptance test on the finding's line
-  - Scenario: a temporary repo (the `Repo` of `test_agentic.py`, whose manifest has `acceptance.files` = `["acceptance/"]`). `src/w.ps1`: line 1 `param()`, line 2 `  $n.ShowBalloonTip(10000, 'a', 'b', 'Info')`, line 3 `# end`, line 4 `Write-Output ('ok')`. `acceptance/t.Tests.ps1`: lines 1-4 `# t`, line 5 `        $src | Should -Match 'ShowBalloonTip\(10000'`. `tests/u.Tests.ps1` (outside the zone) line 1: `"Write-Output ('ok')"`.
+  - Scenario: a temporary repo (the `Repo` of `test_agentic.py`, whose manifest has `acceptance.files` = `["acceptance/"]`). `src/w.ps1`: line 1 `param()`, line 2 `  $n.ShowBalloonTip(10000, 'a', 'b', 'Info')`, line 3 `# end`, line 4 `Write-Output ('ok')`. `acceptance/t.Tests.ps1`: line 1 `$src = Get-Content "$PSScriptRoot/../src/w.ps1" -Raw`, lines 2-4 `# t`, line 5 `        $src | Should -Match 'ShowBalloonTip\(10000'`. `tests/u.Tests.ps1` (outside the zone) line 1: `"Write-Output ('ok')"`.
   - Action: `agentic.py pinned src/w.ps1:2`, then `agentic.py pinned src/w.ps1:4`.
   - Expected: the first prints, as its last stdout line, `{"pinned": [{"file": "src/w.ps1", "line": 2, "test": "acceptance/t.Tests.ps1", "test_line": 5, "text": "ShowBalloonTip(10000"}], "skipped": []}`, exit 0. The second prints `{"pinned": [], "skipped": []}`, exit 0 (line 4 is two lines from line 2; the literal that matches line 4 sits outside the zone).
   - Must not: a pin from a file outside the acceptance zone; an exit other than 0.
   - Check: `test_pinned_conflict.py`, AC-005 tests.
   - WP: WP-01
 - AC-006 · `pinned` ignores weak fragments, skips bad arguments, and never fails
-  - Scenario: the repo of AC-005, with `acceptance/t.Tests.ps1` lines 6-8: `'ShowBalloonTip'`, `'(10000'`, `'*Get-Item -Path*'`; and `src/v.ps1` line 1 `ShowBalloonTip ; (10000 ; Get-Item -Path x`.
-  - Action: `agentic.py pinned src/v.ps1:1 src/w.ps1:0 src/w.ps1:x ../w.ps1:2 src/none.ps1:1 src/w.ps1 src/w.ps1:2 src/w.ps1:2`; then `agentic.py pinned src/w.ps1:2` in a repo whose `architecture.md` has no manifest block and which also holds `src/w.ps1`.
-  - Expected: the first prints `{"pinned": [<the AC-005 pin>], "skipped": ["src/w.ps1:0", "src/w.ps1:x", "../w.ps1:2", "src/none.ps1:1", "src/w.ps1"]}` (nothing for `src/v.ps1:1`; `src/w.ps1:2` once), exit 0. The second: exit 0, a last line with `"pinned": []` and a string `error`.
-  - Must not: a pin from a fragment shorter than 8 characters or without a character of `()[]{}=;`; a traceback with a non-zero exit.
+  - Scenario: the repo of AC-005, with `acceptance/t.Tests.ps1` lines 6-8: `'ShowBalloonTip'`, `'(10000'`, `'*Get-Item -Path*'`, and line 9 `$v = Get-Content "$PSScriptRoot/../src/v.ps1" -Raw`; `src/v.ps1` line 1 `ShowBalloonTip ; (10000 ; Get-Item -Path x`; `src/m.ps1` line 1 `throw "bad (input) value"`; `acceptance/b.Tests.ps1` line 1 `{ Invoke-M } | Should -Throw "bad (input) value"` (a behavioural test: it reads no file and does not name `m.ps1`).
+  - Action: `agentic.py pinned src/v.ps1:1 src/m.ps1:1 src/w.ps1:0 src/w.ps1:x ../w.ps1:2 src/none.ps1:1 src/w.ps1 src/w.ps1:2 src/w.ps1:2`; then `agentic.py pinned src/w.ps1:2` in a repo whose `architecture.md` has no manifest block and which also holds `src/w.ps1`.
+  - Expected: the first prints `{"pinned": [<the AC-005 pin>], "skipped": ["src/w.ps1:0", "src/w.ps1:x", "../w.ps1:2", "src/none.ps1:1", "src/w.ps1"]}` (nothing for `src/v.ps1:1` nor for `src/m.ps1:1`; `src/w.ps1:2` once), exit 0. The second: exit 0, a last line with `"pinned": []` and a string `error`.
+  - Must not: a pin from a fragment shorter than 8 characters or without a character of `()[]{}=;`; a pin from a test file that does not read a file as text or does not name the finding's file; a traceback with a non-zero exit.
   - Check: `test_pinned_conflict.py`, AC-006 tests.
   - WP: WP-01
 - AC-007 · The test-author and the test-auditor are told
@@ -341,6 +345,7 @@ At the start of `closeReview(byAxis)` (JS) and `close_review(by_axis)` (Python),
 | Only Standards reflex findings with a line | Spec and floor findings too | A pin never excuses a correctness or security defect; reflex is the tier a waiver could cover. |
 | One check point, the review's close | Before the verifiers (saves a verifier call) | One insertion point per engine covers the full review and the re-review alike; the verifier call is the price. |
 | Fragment must hold one of `()[]{}=;` and 8+ characters; window ±1 line | Any literal; exact line only; ±2 | Messages and names in tests (`'Get-Item -Path'`, `"file not found"`) would otherwise pin lines their tests only observe; a reviewer's line can be one off. The thresholds are not measured. |
+| Only a test file that reads a file as text (`PIN_READ_RE`) and names the finding's file can pin it | Any acceptance file; also requiring the fragment to share a token with the finding's text | User's choice, to cut false positives: a behavioural test whose message or call happens to match the line never reads the source. The token rule was discarded: a function-length finding names the function its pinned signature holds. The residual case (a static test pinning a part of the line the fix would not touch) goes to a person; the alternative, one fix attempt before routing, was declined as too much machinery for a rare case. |
 | Paths matching `PIN_PATH` only | Quoting arguments | The fallback splits with `shlex` and the workflow's gatekeeper copies the command; a path with spaces would break both. Such findings behave as today. |
 | A fail-open step (no answer → nothing pinned) | Stop the run | It is an instrument, like `callers`: it never makes a run worse than today. |
 | Version 2.22.1 | 2.23.0 | A fix release, as 2.21.1 and 2.21.2 were, although it adds a command (as 2.21.2 added `validate` checks). |
@@ -349,7 +354,7 @@ At the start of `closeReview(byAxis)` (JS) and `close_review(by_axis)` (Python),
 
 ## 11. Risks and open questions
 
-- **False positives** (a reflex finding whose line holds code text an acceptance test also quotes, while the fix would not touch that text): the finding goes to a person instead of a fix. Bounded by the code-character rule and the ±1 window; not measured.
+- **False positives**: only a test that reads the finding's file as text can pin it, so behavioural tests never do. What remains is a static test that pins a part of the line the fix would not change (a pinned signature, a function-length finding): that finding goes to a person instead of a fix. Not measured.
 - **False negatives** (regex literals, concatenations, variables, multi-line pins): the run behaves as today. Not measured.
 - **The first wasted cycle of the field run** (the wave writes the form the rules ask for, the pin fails verification) is only addressed by the prompts of WP-03; prompt changes are not measured here (no bench scenario).
 - **Criteria that pin code text come from the plan.** If `/architect` writes "the source contains `ShowBalloonTip(10000`", the test-author now has a contradiction to report as `BLOCKER`. A sentence in `/architect` and the plan-reviewer is a follow-up, not in this release.
