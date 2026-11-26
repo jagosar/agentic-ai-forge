@@ -15,12 +15,29 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compat  # noqa: E402  - the operating-system layer, next to this file
+# The worktree rule lives in hook.py (never owned, installed with the flow). An older hook.py beside this core must not
+# stop `agentic.py hook` before the guard's own try (an exit 1 lets the tool call through): then today's root applies.
+try:
+    from hook import linked_worktree  # noqa: E402
+except ImportError:
+    linked_worktree = None
 
 HERE = Path(__file__).resolve().parent
 ENTRY = HERE / "agentic.py"  # the entry script: what subprocesses and run_steps execute
 # Where the flow is installed from: this repo, or the plugin.
 SOURCE_ROOT = HERE.parents[1]
-ROOT = Path(os.environ.get("CLAUDE_PROJECT_DIR") or SOURCE_ROOT)
+
+
+def project_root():
+    """CLAUDE_PROJECT_DIR, else SOURCE_ROOT; but the script's own checkout when it is a linked git worktree of the
+    repository CLAUDE_PROJECT_DIR names (Claude Code keeps the variable at the checkout the session started in)."""
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env and linked_worktree is not None and linked_worktree(SOURCE_ROOT, env) == SOURCE_ROOT.resolve():
+        return SOURCE_ROOT
+    return Path(env or SOURCE_ROOT)
+
+
+ROOT = project_root()
 ARCH = ROOT / "architecture.md"
 STATE = ROOT / ".claude" / "state"
 USAGE = STATE / "usage.jsonl"

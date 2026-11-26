@@ -553,7 +553,8 @@ def _hints(d):
     if not any(s["declares_hook"] for s in d["settings"]):
         hints.append("no settings file read here declares the flow's hook")
     hints += [f"the hook ran, but wrote its heartbeat in {h['path']}: the hook and this command see different "
-              "project roots (a git worktree?)" for h in d["heartbeats"][1:]
+              "project roots (a git worktree?). The hook comes from the checkout the session started in: update the "
+              "flow there (agentic.py install), or start the session in this folder" for h in d["heartbeats"][1:]
               if h["age_s"] is not None and h["age_s"] <= HOOK_SEEN_MAX_AGE_S]
     return hints or ["the session did not run the project's hooks: check /hooks in this session and that the "
                      "workspace is trusted"]

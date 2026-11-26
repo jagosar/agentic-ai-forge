@@ -1,70 +1,54 @@
-# Architecture: a Standards finding pinned by an acceptance test goes to a person, not to a fix (issue 145; agentic-flow 2.22.1)
+# Architecture: the hook and agentic.py resolve the same root inside a git worktree (agentic-flow 2.22.2)
 Type: fix · Size: standard
 
 ## 1. Goal
 
-A field run (PowerShell, native engine, ≤ 2.21.1) ended `REVIEW` with build, tests (1537/0) and acceptance green. The acceptance test of AC-810 greps the source for `ShowBalloonTip(10000`. The sequence, read from its `workflow-result.json`: the wave wrote a named constant (as section 7 asks), verification failed AC-810 (`verification_failures[0].fix_cycle: 0`, before any fix cycle), fix 1 put the literal back, the Standards reviewer confirmed "No magic numbers" on that line (`F68e7a69e`), fix 2 (the escalation model) knowingly left the literal and said why, the re-review said NOT_ADDRESSED and the run ended with a `fix limit reached` item that reads as an implementer failure.
+A field session in a git worktree (2026-11-26, a PowerShell project) could not start native `/implement`: `hooks-check` exited 3, "the guardrail hook did not run for this call". Claude Code keeps `CLAUDE_PROJECT_DIR` at the main checkout after the session enters a worktree. It documents that the hook's stdin JSON `cwd` is the worktree root (https://code.claude.com/docs/en/worktrees.md). The hook command `python3 "$CLAUDE_PROJECT_DIR/.claude/bin/hook.py"` therefore ran the main checkout's guard, whose root was the main checkout. Its heartbeat, claims, ledger, manifest and git checks all belonged to the main checkout. `agentic.py` commands run from the worktree used the worktree as their root. Writes were broken too, though less visibly: a worktree under `.claude/worktrees/` is, for the main checkout's guard, a path under `.claude/`, which no flow agent may write.
 
-This release does two things:
-1. **Detection, deterministic.** After every review, a new read-only command `agentic.py pinned` checks each confirmed Standards reflex finding with a line: if a string literal of an acceptance test, read as code text, occurs on that line, the finding leaves the fix queue and becomes a blocking pending item of type `acceptance conflict`, which names the test. No fix cycle is spent on it, in both engines.
-2. **Prevention, in wave 0.** The test-author is told not to assert on source text when the behaviour can be observed through section 6, and never to pin a form section 7 or the rules forbid; the test-auditor reports such a pin as a blocking finding.
+After this fix, `hook.py` reads the call's `cwd`. When a call of the session's main thread has its `cwd` in a linked worktree of the same repository that has the flow installed, `hook.py` runs that worktree's guard with that worktree as its root, and records the choice for the session. An agent's call (one with `agent_id`) is judged in the root the main thread chose for its session, never by its own `cwd`, so an agent that changes directory cannot change guard; a fallback agent (`AGENTIC_WP`) keeps the root its launcher set. `core.ROOT` follows the same rule when `CLAUDE_PROJECT_DIR` names the main checkout but the running `agentic.py` lives in the worktree. Native `/implement` then works in a worktree with no move to the main folder and no fallback.
 
 ## 2. Scope
 
 ### Included
 
-- `agentic.py pinned FILE:LINE ...`: one JSON line with the pins it found; exit 0 whatever happens.
-- `findings.py`: which findings are checked, how the command's answer splits them, and the pending item; mirrored in the workflow.
-- Both engines: the check in the review's close; the pending list `acceptance conflict`; `review.standards.pinned`.
-- Four conformance scenarios (Annex A).
-- `test-author.md` and `test-auditor.md`: one rule and one checklist item.
-- Release 2.22.1: notes, `/implement`'s presentation, `how-it-works.md`, the budget, the 2.22.0 acceptance file's version pin.
+- `.claude/bin/hook.py`: `linked_worktree(start, project)`; the root and the guard chosen from the main thread's stdin `cwd` and remembered per session; agents pinned to it; stdin handed on unchanged.
+- `.claude/bin/core.py`: `ROOT` is the worktree when `CLAUDE_PROJECT_DIR` names another checkout of the same repository and the running script lives in a linked worktree.
+- `.claude/bin/guardrail.py`: the worktree hint of the hook diagnosis also says to update the flow in the checkout the session started from.
+- Worktrees: any linked worktree of the same repository, under `.claude/worktrees/` or elsewhere (`git worktree add ../folder`, which `sessions-check` recommends). User's choice.
+- Release 2.22.2: notes, `how-it-works.md`, the budget, the version pin of `test_acceptance_v222.py`.
 
 ### Excluded (non-goals)
 
-- Spec-axis findings, floor-tier findings and finish notes: never checked (a pin does not excuse a correctness or security defect).
-- A finding the reviewer gave without `line`, or the parts `split_by_owner` makes (they have no line): never checked.
-- JavaScript regex literals (`/.../`), string concatenations, values held in variables: not recognised as pins. A pin the command does not see behaves as today.
-- The verification failure that comes first when the wave writes the form the rules ask for (fix 1 of the field run): left to the prevention in wave 0.
-- An implementer reporting a conflict, and the Standards reviewer declaring one (both discussed and declined: section 10).
-- Auto-waiving: the conflict blocks; the person decides.
-- A change to `/architect` or the plan-reviewer about criteria that pin code text (section 11).
+- Running git to find worktrees: the rule reads `.git` files only.
+- A worktree without the flow (no `.claude/bin/agentic.py`), a worktree of another repository, a submodule: the guard behaves as today.
+- Changing `.claude/settings.json`'s hook command.
+- A main checkout whose `hook.py` predates this release. It still runs its old logic; the diagnosis hint names the remedy.
+- `sessions-check` behaviour and message.
+- `waiting.py` (the other never-owned hook script, `.claude/bin/waiting.py:106-112`) still roots on `CLAUDE_PROJECT_DIR`: in a worktree its waiting record lands in the main checkout. It only observes; left for a later release.
 
 ## 3. Stack
 
-Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workflow.mjs`. No package manager, no new dependency.
+Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workflow.mjs`. No package manager, no new dependency. `git` (for the tests' worktrees).
 
 - Unit and acceptance: `python3 -m unittest discover -s .claude/bin -p "test_*.py"`
-- The repository's own suites, which CI also runs (`.github/workflows/agentic-flow-ci.yml:70-71`): `python3 -m unittest discover -s acceptance` and `python3 -m unittest discover -s qa`
-- The workflow against the conformance scenarios: `node .claude/bin/test_workflow.mjs`
+- The repository's suites CI also runs: `python3 -m unittest discover -s acceptance`, `python3 -m unittest discover -s qa`
+- The workflow: `node .claude/bin/test_workflow.mjs`
 - Quality limits: `python3 .claude/bin/agentic.py quality`
-- Bench: `python3 -m unittest discover -s bench -p "test_*.py"` and `python3 -m unittest discover -s bench/acceptance`
 
 ## 4. Repository structure
 
 ```
-.claude/bin/repo_scan.py                 WP-01  pin_fragments, find_pins, pinned (the command), the PIN_* constants
-.claude/bin/agentic.py                   WP-01  cmd_pinned, COMMANDS, the usage line, the import
-.claude/bin/launch.py                    WP-01  "pinned" in SEQ_COMMANDS
-.claude/bin/test_pinned.py               WP-01  new: unit cases of the command and its helpers
-.claude/bin/test_definitions.py          WP-01  the command count (line 510): 37 -> 38
-.claude/bin/findings.py                  WP-02  PIN_PATH, PIN_MAX_ARGS, ACCEPTANCE_CONFLICT_DECISION, pinned_args, split_pinned, conflict_item
-.claude/bin/pipeline.py                  WP-02  close_review checks pins; conflict_pending; pending_now
-.claude/workflows/agentic-implement.js   WP-02  the same, in the native engine, with mirrors of the findings.py helpers
-.claude/bin/conformance.json             WP-02  four scenarios (Annex A)
-.claude/bin/test_pipeline.py             WP-02  the simulated world answers `pinned`
-.claude/bin/test_workflow.mjs            WP-02  the same
-.claude/bin/test_pinned_findings.py      WP-02  new: unit cases of the findings.py helpers
-.claude/agents/test-author.md            WP-03  rule 2 extended
-.claude/agents/test-auditor.md           WP-03  checklist item and severity
-.claude/commands/implement.md            WP-03  the pending item and review.standards.pinned
-docs/how-it-works.md                     WP-03  one paragraph
-.claude-plugin/plugin.json               WP-03  2.22.1
-.claude/bin/upgrade.py                   WP-03  NOTES["2.22.1"]
-.claude/flow-budget.json                 WP-03  code lines and prompt bytes, with the why
-.claude/bin/test_acceptance_v222.py      WP-03  its version pin (line 229): 2.22.1
-.claude/bin/test_pinned_conflict.py      AT
-.claude/quality-baseline.json            by hand: agentic-implement.js's stored lines, raised in WP-02's commit if needed
+.claude/bin/hook.py                      by hand (never owned), committed first: linked_worktree, choose_root, the session's root
+.claude/bin/test_worktree_root.py        WP-01  new: unit cases of linked_worktree and choose_root
+.claude/bin/core.py                      WP-02  project_root(); ROOT = project_root()
+.claude/bin/guardrail.py                 WP-02  the worktree hint's text
+.claude/bin/test_core_root.py            WP-02  new: unit cases of project_root
+docs/how-it-works.md                     WP-03  one paragraph on worktrees
+.claude-plugin/plugin.json               WP-03  2.22.2
+.claude/bin/upgrade.py                   WP-03  NOTES["2.22.2"]
+.claude/flow-budget.json                 WP-03
+.claude/bin/test_acceptance_v222.py      WP-03  its version pin (line 229): 2.22.2
+.claude/bin/test_worktree_hook.py        AT
 .claude/flow-history.json                by hand: regenerated as the last commit
 ```
 
@@ -72,361 +56,250 @@ docs/how-it-works.md                     WP-03  one paragraph
 
 | What an implementer needs to know | Where it is (`file:lines`) | Pattern or rule | Source |
 |---|---|---|---|
-| A read-only analysis command: one JSON line on stdout, a warning on stderr, exit 0 even on error, `EMPTY_*` shape plus `error` | `.claude/bin/repo_scan.py:270-283` | Copy this shape for `pinned` | read |
-| Module constants with a comment each (`CALLERS_PER_SYMBOL`, `CALLERS_MAX`…) | `.claude/bin/repo_scan.py:178-186` | Name every `PIN_*` limit the same way, and give each a one-line comment (these have none) | read |
-| `repo_scan.py` imports from `core` in one block | `.claude/bin/repo_scan.py:13-16` | Add `at_entity` there | read |
-| Commands: a `cmd_*` wrapper, the `COMMANDS` table, the usage docstring line, the import from `repo_scan` | `.claude/bin/agentic.py:40`, `.claude/bin/agentic.py:101`, `.claude/bin/agentic.py:315-316`, `.claude/bin/agentic.py:427-439` | `pinned` joins each | read |
-| `test_commands_match_the_docstring` holds the usage docstring and `COMMANDS` equal, and pins their count at 37 | `.claude/bin/test_definitions.py:507-510` | Add the usage line; change 37 to 38 | read |
-| `seq` accepts only `SEQ_COMMANDS` | `.claude/bin/launch.py:49-50`, `.claude/bin/launch.py:493-509` | Add `"pinned"` | read |
-| The fallback's gate runs each command with `shlex.split` and merges stdout then stderr | `.claude/bin/launch.py:476-491`, `.claude/bin/launch.py:624-626` | A path with spaces or quotes cannot be an argument: such findings are not checked | read |
-| The acceptance zone: `at_entity(manifest)["files"]`, `acceptance/` by default; `owns(pattern, path)` | `.claude/bin/core.py:231-234`, `.claude/bin/core.py:262-264` | | read |
-| `source_files()`: git's tracked and untracked files, without dependency folders | `.claude/bin/core.py:329-339` | Acceptance tests written in wave 0 are untracked and still listed | read |
-| `findings.py` is pure (no flow imports), mirrored by the workflow; `_without_root` strips the repo root and reads `\` as `/` | `.claude/bin/findings.py:1-8`, `.claude/bin/findings.py:109-122` | New helpers live here; the JS mirrors them | read |
-| A pending item built by a helper with a module constant (`QA_NOT_RUN_DETAIL`, `_not_run_item`) | `.claude/bin/findings.py:22-23`, `.claude/bin/findings.py:168-190` | `conflict_item` and `ACCEPTANCE_CONFLICT_DECISION` follow it | read |
-| The workflow's mirror of those helpers | `.claude/workflows/agentic-implement.js:219-232` | `pinnedArgs`, `splitPinned`, `conflictItem` go beside it | read |
-| `noRoot` (JS mirror of `_without_root`) and `plan.root` | `.claude/workflows/agentic-implement.js:180-190`, `.claude/workflows/agentic-implement.js:194-196` | | read |
-| Pending lists and `pendingNow`; `pendingKey` for dedupe | `.claude/workflows/agentic-implement.js:266-270`, `.claude/workflows/agentic-implement.js:306-318` | Add `conflictPending` after `limitPending` | read |
-| `closeReview`: sets `lastConfirmed`, closes review, opens QA | `.claude/workflows/agentic-implement.js:709-722` | The pin check goes at its start | read |
-| `run.review` is built before `closeReview` in both review paths; `review.standards.waived` is set there | `.claude/workflows/agentic-implement.js:640-657`, `.claude/workflows/agentic-implement.js:697-707` | `closeReview` overwrites `standards.confirmed` and `confirmed`, and sets `standards.pinned` | read |
-| `seq` with one command calls the gate directly; `step`, `ok`, `lastJson` | `.claude/workflows/agentic-implement.js:107-135` | | read |
-| The result decides `REVIEW` when any pending item `blocks` | `.claude/workflows/agentic-implement.js:868-871`, `.claude/bin/pipeline.py:654-655` | A conflict item has `tier: "reflex"`, and the result's check passes no waivers, so it always blocks (a waived finding is never confirmed, so never pinned) | read |
-| The fallback: `__init__` lists, `pending_now`, `close_review` | `.claude/bin/pipeline.py:42-53`, `.claude/bin/pipeline.py:139-140`, `.claude/bin/pipeline.py:570-576` | The same change as the workflow | read |
-| `pipeline.py` imports from `findings` in one block | `.claude/bin/pipeline.py:17-19` | | read |
-| A hand fix (`run-wave --fix`) reads only `confirmed` of each axis from the run record | `.claude/bin/launch.py:341-348` | A pinned finding is never fixed by hand: no change needed (AC-001 checks the record) | read |
-| The simulated worlds: every gate command's default answer | `.claude/bin/test_pipeline.py:54-78`, `.claude/bin/test_workflow.mjs:29-41` | Add `pinned` → `{"pinned": [], "skipped": []}` | read |
-| `run_scenario` returns a summary; `world` + `pipeline.Pipeline` give the full result | `.claude/bin/test_pipeline.py:204-208` | The AT reads `pending` items from the full result | read |
-| The happy path makes exactly 10 gatekeeper calls | `.claude/bin/test_workflow.mjs:345-352` | No `pinned` call without a candidate | read |
-| A scenario's declaration (standards findings, `gate_fail` with an output) | `.claude/bin/conformance.json:908-930`, `.claude/bin/conformance.json:996-1025` (scenarios "callers reach the reviewer" and "a reflex finding blocks until it is fixed") | Annex A uses the same keys | read |
-| Unit tests of findings helpers, header and style | `.claude/bin/test_owner_split.py:1-30` | | read |
-| Command tests in a temporary repo (`Repo`, `MANIFEST` with `acceptance/`) | `.claude/bin/test_agentic.py:34-75`, `.claude/bin/test_agentic.py:906-916` | | read |
-| Release notes: newest first after `2.11.0`'s entry; `2.22.0` at line 156 | `.claude/bin/upgrade.py:156-163` | `2.22.1` goes right before `2.22.0` | read |
-| `/implement`'s pending bullets | `.claude/commands/implement.md:63-67` | One bullet for `acceptance conflict` | read |
-| The 2.22.0 acceptance file pins the version, and forbids other test files from pinning `2.22.0` or `2.21.2` | `.claude/bin/test_acceptance_v222.py:226-252` | Change only line 229 to `"2.22.1"` | read |
-| Quality ratchet: functions ≤ 60 lines, nesting ≤ 4, lines ≤ 120 chars; `agentic-implement.js` is stored at 890 lines and 64 long lines (allowance 920 lines, 64 long lines); `pipeline.py` at 29 long lines | `.claude/quality-baseline.json`, `.claude/bin/quality.py:232-235` | No new line over 120 characters in either engine. The JS's 30-line growth is likely not enough (estimate 30-40 lines, not measured): its stored `lines` is raised by hand in WP-02's commit, with the reason in the message, as `ea92ec5` did (831 → 890) | read |
-| The test-author's black-box rule and the auditor's checklist | `.claude/agents/test-author.md:17-25`, `.claude/agents/test-auditor.md:20-36` | | read |
-| The auditor reads the AT brief, which ends with the rules since 2.22.0 | `.claude/agents/test-auditor.md:18`, design 0032 | It can tell a forbidden form | read |
-| The field run's sequence (wave wrote the constant; fix 1 restored the literal; fix 2 left it) | issue 145; `verification_failures` recorded with `run.fix_cycles` before `fixCycle` increments it (`.claude/workflows/agentic-implement.js:545`, `.claude/workflows/agentic-implement.js:829-832`) | | inferred |
+| The hook launcher: chooses `agentic.py` from `CLAUDE_PROJECT_DIR` or its own location; fails closed (exit 2) when it cannot choose; runs it with `runpy` and `argv = [script, "hook"]` | `.claude/bin/hook.py:1-29` | Standard library only, Python 3.9, no annotations, never imports `agentic.py` at module level | read |
+| `hook.py` is never owned by any package, and `validate` rejects a plan that gives it to one | `.claude/bin/core.py:50-54`, `.claude/bin/core.py:296-302` | It is edited by hand in this release | read |
+| `ROOT` is `CLAUDE_PROJECT_DIR`, else `SOURCE_ROOT` (two levels above `core.py`), computed at import | `.claude/bin/core.py:18-24` | Every module reads `core.ROOT`; it must stay a module constant | read |
+| `root_drift` refuses a command whose `CLAUDE_PROJECT_DIR` names another repository while the cwd is outside it; a worktree under `<main>/.claude/worktrees/` is inside main, so today it passes and acts on main | `.claude/bin/core.py:174-186` | With the new `ROOT` it sees `SOURCE_ROOT == ROOT` and returns None | read |
+| The guard reads the hook's JSON with `compat.read_stdin_text()`, which reads `sys.stdin.buffer` | `.claude/bin/guardrail.py:639-652`, `.claude/bin/compat.py:112-114` | `hook.py` replaces `sys.stdin` with a `TextIOWrapper` over a `BytesIO` of the bytes it read | read |
+| A write outside `ROOT` is refused; a path under `.claude/` is refused (`flow_path_refused`) | `.claude/bin/guardrail.py:322-347`, `.claude/bin/core.py:304-306` | Why every write in `<main>/.claude/worktrees/<n>/` is refused today | read |
+| The heartbeat lives in `ROOT/.claude/state/hook-seen.json` | `.claude/bin/guardrail.py:382-397` | | read |
+| The diagnosis: `_worktree` (git), heartbeats of ROOT, main and cwd's top level, the "different project roots" hint | `.claude/bin/guardrail.py:509-532`, `.claude/bin/guardrail.py:545-560` | Only the hint's text changes; keep the words `different project roots` and `hook-seen.json` (`.claude/bin/test_hook_diagnosis.py:141-143`) | read |
+| A test that creates a worktree under `.claude/worktrees/` and runs `hooks-check` there | `.claude/bin/test_hook_diagnosis.py:120-145` | Copy its git setup (`GIT`, commit, `git worktree add`) | read |
+| A test copy of the flow in a temporary git repo (`hook_copy`) | `.claude/bin/test_hook_path.py:27-40` | The AT and WP-01 build repos with `.claude/bin` committed, so a worktree has the flow | read |
+| Running `hook.py` with a payload and `AGENTIC_WP` | `.claude/bin/test_guardrail.py:305-321` | | read |
+| Install copies `.claude/bin/<name>.py` for the names in `INSTALL_BIN` (`hook` included) | `.claude/bin/installer.py:19-30` | No new module: nothing to add | read |
+| The settings run the hook through `$CLAUDE_PROJECT_DIR/.claude/bin/hook.py`, pinned by a test | `.claude/bin/test_definitions.py:349-351` | Unchanged | read |
+| Release notes go newest first, `2.22.1` at the top of the recent block | `.claude/bin/upgrade.py:156-165` | `2.22.2` right before `2.22.1` | read |
+| `test_acceptance_v222.py` pins the plugin version on line 229 | `.claude/bin/test_acceptance_v222.py:226-229` | `"2.22.1"` → `"2.22.2"` | read |
+| `test_pinned_conflict.py` (2.22.1) checks the version is ≥ 2.22.1 and that `"2.22.1"` is followed by `"2.22.0"` in `NOTES` | `.claude/bin/test_pinned_conflict.py:193-200` | Still true with `2.22.2` placed before `2.22.1` | read |
+| Claude Code keeps `CLAUDE_PROJECT_DIR` at the main checkout and gives the worktree root as the stdin `cwd`; whether Bash commands get `CLAUDE_PROJECT_DIR` is not documented | https://code.claude.com/docs/en/worktrees.md | The field diagnosis showed `project_dir = null` in a Bash call. The AT reproduces these documented values; no real `claude --worktree` payload was captured | inferred |
+| A subagent's hook payload carries its parent session's `session_id` (with its own `agent_id`) | not documented; design 0024 calls the gatekeeper's session id "not verified" | If it does not, a native agent falls back to the main checkout's root (today's behaviour: its writes in the worktree are refused, a visible stop) | inferred |
 
-What must NOT change: the happy path's gate calls; prompts and schemas (`pipeline-spec.json` is untouched); spec findings; waivers; the re-review's verdict handling.
+What must NOT change: the hook's behaviour outside a linked worktree (same guard, same root, same exit codes); `settings.json`; the import budget of the hook (`test_hook_path.py`, `test_lean_hook.py`).
 
 ## 5. Data model
 
 ```python
-# findings.py
-PIN_PATH = r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*"  # a repo-relative path the gate can pass unquoted
-PIN_MAX_ARGS = 40                                      # arguments of one pinned call, so the command stays short
-ACCEPTANCE_CONFLICT_DECISION = (
-    "the fix would break the acceptance test that pins this line's text: change the test to check behaviour, "
-    "or waive this rule for this file in the plan's waivers")
-
-# repo_scan.py
-PIN_PATH = r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*"  # the same pattern as findings.PIN_PATH (AC-003 holds them equal)
-PIN_MIN_CHARS = 8           # a shorter fragment pins nothing
-PIN_CODE_CHARS = "()[]{}=;"  # a fragment must hold one: it is code text, not a word or a message
-PIN_WINDOW = 1              # lines around the finding's line that are searched
-PIN_MAX_BYTES = 262144      # a larger acceptance file is not read
-PIN_TEXT_MAX = 160          # characters of the fragment reported
-# A test file that reads a file as text: only such a file can pin the source's text (a behavioural test cannot).
-PIN_READ_RE = re.compile(r"Get-Content|ReadAll(?:Text|Lines)|read_text|readFileSync|readFile|ReadFile|readString"
-                         r"|readAllLines|file_get_contents|File\.read|\bopen\(")
-EMPTY_PINNED = {"pinned": [], "skipped": []}
+# hook.py
+GITDIR_PREFIX = "gitdir:"   # the first line of a linked worktree's .git file
+WORKTREES_DIR = "worktrees"  # a linked worktree's git dir is <common>/worktrees/<name>
+FLOW_ENTRY = Path(".claude") / "bin" / "agentic.py"
+SESSION_ROOTS = Path(".claude") / "state" / "worktree-roots.json"  # under the project (CLAUDE_PROJECT_DIR)
+SESSION_ROOTS_MAX = 20  # sessions remembered; the oldest are dropped
 ```
 
-A pin, as the command reports it:
-
-```json
-{"file": "src/w.ps1", "line": 2, "test": "acceptance/t.Tests.ps1", "test_line": 5, "text": "ShowBalloonTip(10000"}
-```
-
-A pinned finding: the finding with `"pinned_by": {"test", "test_line", "text"}`. The pending item:
-
-```json
-{"type": "acceptance conflict", "source": "standards-reviewer", "...the pinned finding's fields...": "",
- "decision": "<ACCEPTANCE_CONFLICT_DECISION>"}
-```
-
-`run.review.standards.pinned`: the pinned findings of that review (`[]` when none). The run's result gains no new key.
+`<project>/.claude/state/worktree-roots.json`: `{"<session_id>": {"root": "<absolute path>", "ts": <epoch seconds>}}`, at most `SESSION_ROOTS_MAX` entries (the newest by `ts`). It lives under `.claude/state/`, which no agent may write (`.claude/bin/core.py:50-54`). Every other piece of state lives in `<root>/.claude/state/`, as for any root.
 
 ## 6. Contracts between modules
 
-### C1 · `agentic.py pinned [FILE:LINE ...]` (WP-01; consumed by WP-02 by signature, by the AT)
+### C1 · `hook.linked_worktree(start, project) -> Path | None` (hook.py; used by core.py and the tests)
 
-- Order: with no arguments, it prints the empty shape at once; otherwise it reads the manifest first (a missing manifest is the error path), then checks the arguments.
-- Prints one JSON line on stdout, `{"pinned": [pin, ...], "skipped": [arg, ...]}`, and exits 0. On any unexpected exception: a line `[agentic] pinned skipped: <Type>: <msg>` on stderr, then `{"pinned": [], "skipped": [], "error": "<Type>: <msg>"}`, exit 0. With no arguments: `{"pinned": [], "skipped": []}` without reading the manifest.
-- **An argument** is split at its last `:`. It is skipped (listed in `skipped`, once, in argument order) when the path does not fully match `PIN_PATH`, has a segment `.` or `..`, the line part does not fully match `[1-9][0-9]*`, or `ROOT / path` is not a file. The source file is read with the same rules as the tests (UTF-8 with `errors="replace"`, `\r` stripped; larger than `PIN_MAX_BYTES`: skipped). A test file that is the finding's own file is not searched for that argument (a test never pins itself). A repeated argument is ignored after its first appearance.
-- **The tests**: the files of `source_files()` owned by any pattern of `at_entity(load_manifest())["files"]` (`owns`), in sorted order, each at most `PIN_MAX_BYTES` bytes (larger ones are left out), read as UTF-8 with `errors="replace"`, split on `\n` with `\r` stripped.
-- **`pin_fragments(line) -> list[str]`** (pure): for each match, in order, of `'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"` in the line, its content is split on `\.\*\??|\.\+\??|\\[sSdDwW][*+?]?|[*^$]`; each piece has `\\(.)` replaced by the character, is stripped of whitespace, and is kept when it has at least `PIN_MIN_CHARS` characters and contains at least one character of `PIN_CODE_CHARS`. `'ShowBalloonTip\(10000'` gives `["ShowBalloonTip(10000"]`; `'*Get-Item -Path*'` gives `[]` (no code character); `"a(b"` gives `[]` (too short).
-- **Which tests can pin a path:** a test file counts for an argument only when its text matches `PIN_READ_RE` (it reads some file as text) and contains the argument's file name (the last path segment, compared case-insensitively). Other test files are not searched for that argument.
-- **`find_pins(path, line, tests) -> dict | None`** (pure over text): `tests` is `[(test_path, [lines])]`, already reduced to the files that can pin `path`. The source window is lines `max(1, line - PIN_WINDOW) .. line + PIN_WINDOW` of `path` (those that exist). The answer is the first `(test_path, test_line, fragment)`, in the order test path, test line ascending, fragment order, whose fragment occurs as a substring of a window line; `text` is the fragment cut to `PIN_TEXT_MAX` characters. `None` when nothing matches.
-- `pinned` lists at most one pin per argument, in argument order.
+- `start`, `project`: `str` or `Path`. Never raises; on `OSError` or `ValueError` it returns `None`.
+- From `Path(start).resolve()` up through its parents, the first directory `d` holding a `.git` entry decides:
+  - `.git` is a directory → `None` (a main checkout).
+  - `.git` is a file whose first line starts with `gitdir:` → `gd` = the rest, stripped, resolved against `d` when relative. When `gd.parent.name` is not `worktrees` → `None` (a submodule). Otherwise `common = gd.parent.parent`.
+  - Anything else → `None`.
+- No `.git` entry anywhere up the path → `None`.
+- `project`'s common git dir: `project/.git` when it is a directory; when it is a file, the `common` computed from it the same way. When it has none → `None`.
+- Returns `d` (resolved) when `common == project's common dir` (both resolved) and `d / ".claude/bin/agentic.py"` is a file; `None` otherwise.
 
-### C2 · `findings.py` (WP-02; mirrored in the workflow)
+### C2 · `hook.choose_root(raw, project, env) -> Path` (hook.py)
 
-- `pin_path(finding, root) -> str | None`: `None` unless the finding is a dict with `tier == "reflex"`, a `line` that is an `int` (not a `bool`) and ≥ 1, and a non-empty string `file`. The path is `_without_root(file, root)` (`root` a string, else `""`); `None` unless it fully matches `PIN_PATH` and has no segment `.` or `..`.
-- `pinned_args(findings, root) -> list[str]`: `f"{pin_path(f, root)}:{f['line']}"` for each finding with a path, in order, without repeats, the first `PIN_MAX_ARGS`.
-- `split_pinned(findings, root, answer) -> (kept, pinned)`: `answer` is the command's parsed JSON or `None`. Its usable pins are the entries of `answer["pinned"]` (when `answer` is a dict and that is a list) that are dicts with a string `file`, `test` and `text` and integer `line` and `test_line` (a `bool` is not an integer in Python; a float such as `3.0` is not one either. The command only prints ints, so JS's `Number.isInteger` is enough there). A finding is pinned when its `pin_path` and `line` equal a usable pin's `file` and `line` and its argument is among `pinned_args(findings, root)`. `kept`: the other findings, the same objects, in order. `pinned`: copies of the pinned ones with `"pinned_by": {"test", "test_line", "text"}` from that pin, in order. A malformed answer pins nothing.
-- `conflict_item(finding) -> dict`: `{"type": "acceptance conflict", "source": "standards-reviewer", **finding, "decision": ACCEPTANCE_CONFLICT_DECISION}`.
-- JS mirrors, same names in camelCase: `pinPath(f)`, `pinnedArgs(findings)`, `splitPinned(findings, answer)` returning `{ kept, pinned }`, `conflictItem(f)`, all reading `plan.root` through `str(plan.root)`, with `PIN_PATH`, `PIN_MAX_ARGS` and `ACCEPTANCE_CONFLICT_DECISION` equal to the Python values. `Number.isInteger` stands for the `int` check, and the JS `PIN_PATH` is anchored (`new RegExp('^(?:' + PIN_PATH + ')$')`) because Python uses `fullmatch`.
+- `raw`: the bytes of stdin. `project`: today's root (`CLAUDE_PROJECT_DIR`, else two levels above `hook.py`). `env`: a mapping (the process environment; tests pass a dict).
+- The payload: `json.loads(raw.decode("utf-8"))` when it is a dict; any decoding error or other shape → `Path(project)`. `cwd`, `session_id` and `agent_id` are read only when they are non-empty strings.
+- `env.get("AGENTIC_WP")` set → `Path(project)` (a fallback agent: its launcher already set `CLAUDE_PROJECT_DIR` to the run's root, `.claude/bin/launch.py:236`).
+- `agent_id` present (a subagent of the session) → the root remembered for `session_id` when it is still `linked_worktree(root, project) == root`; otherwise `Path(project)`. The agent's own `cwd` is never read.
+- Otherwise (the main thread): `root = linked_worktree(cwd, project)` when `cwd` is given, else `None`; then `remember(project, session_id, root)` when `session_id` is given; returns `root` or `Path(project)`.
+- `remember(project, session_id, root)`: writes `SESSION_ROOTS` under `project` with that session's entry set to `{"root": str(root), "ts": time.time()}` when `root` is not `None`, or removed when it is; it keeps the newest `SESSION_ROOTS_MAX`; creates `<project>/.claude/state/` when missing (`mkdir(parents=True, exist_ok=True)`: a main checkout used only through worktrees never had one); writes a temporary file beside it named with the process id (`worktree-roots.json.<pid>.tmp`) and `os.replace`s it; an entry whose `root` is unchanged is not rewritten (its `ts` stays: the file is written only when a session's root changes); any `OSError` or `ValueError` is ignored (an agent then falls back to `project`, today's behaviour).
+- `remembered(project, session_id) -> Path | None`: the entry's `root`, or `None` when the file, the entry or its shape is missing.
 
-### C3 · The engines' review close (WP-02)
+### C3 · `hook.main()` (the launcher)
 
-At the start of `closeReview(byAxis)` (JS) and `close_review(by_axis)` (Python), before anything else:
+1. `raw = sys.stdin.buffer.read()`.
+2. `project` as today; `root = choose_root(raw, project, os.environ)`.
+3. When `root` differs from `Path(project)`: `os.environ["CLAUDE_PROJECT_DIR"] = str(root)`. Otherwise the environment is left as it is.
+4. `sys.stdin = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8")`; `sys.argv = [str(script), "hook"]` with `script = root / ".claude/bin/agentic.py"`; `runpy.run_path(str(script), run_name="__main__")`.
+- `runpy.run_path` leaves `hook.py`'s own folder (the main checkout's `.claude/bin`) as `sys.path[0]`; the worktree's `agentic.py` and `core.py` insert their own folder first (`.claude/bin/agentic.py:79`, `.claude/bin/core.py:15`), so `import hook` inside the worktree's `core` loads the worktree's copy.
+- Steps 1-2 inside the existing `try`: any exception prints today's `[agentic hook.py] cannot choose the guard, blocked for safety: ...` and exits 2.
 
-1. `args = pinnedArgs(byAxis.standards)` (Python: `pinned_args(by_axis["standards"], self.plan.get("root"))`; `split_pinned` takes the same root). When empty: no gate call, `run.review.standards.pinned = []`, and the rest is as today.
-2. Otherwise one gate call, alone, labelled `pinned`: the command `pinned <args joined by one space>`. Its answer is `lastJson(output)` when the step exists and exited 0, else `null`.
-3. `{kept, pinned} = splitPinned(byAxis.standards, answer)`; `byAxis` becomes `{spec, standards: kept}`. Each pinned finding's `conflictItem` joins `conflictPending` (`self.conflict_pending`) unless an item with the same `pendingKey` is there.
-4. `run.review.standards.confirmed = kept`, `run.review.standards.pinned = pinned`, `run.review.confirmed = [...spec, ...kept]`.
-5. The rest of today's `closeReview` runs with the new `byAxis`: `lastConfirmed`, the `REVIEW=pass|fail` mark (from what is left) and the returned `confirmed` exclude the pinned findings.
+### C4 · `core.project_root() -> Path` (core.py); `ROOT = project_root()`
 
-`pendingNow()` / `pending_now()` become `[...qaPending, ...limitPending, ...conflictPending, ...concernPending, ...newPending]`. `conflictPending` starts empty and is kept for the whole run.
+- `env = os.environ.get("CLAUDE_PROJECT_DIR")`.
+- When `env` is set and `hook.linked_worktree(SOURCE_ROOT, env)` equals `SOURCE_ROOT.resolve()`: `SOURCE_ROOT`.
+- Otherwise: `Path(env or SOURCE_ROOT)` (today's value).
+- `core` imports `linked_worktree` from the sibling `hook` module inside `try: from hook import linked_worktree` / `except ImportError: linked_worktree = None`; when it is `None`, `project_root()` returns today's value. An older `hook.py` beside a newer `core.py` (an `install` that kept a user-edited `hook.py`, `.claude/bin/installer.py:209-214`, or a half-done upgrade) must never stop `agentic.py hook` before `guardrail.hook()`'s `try`: that would exit 1, which Claude Code does not treat as a block (`.claude/bin/agentic.py:82-89`). `hook.py` has no side effect at import.
+
+### C5 · The diagnosis hint (guardrail.py `_hints`)
+
+The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the hook and this command see different project roots (a git worktree?). The hook comes from the checkout the session started in: update the flow there (agentic.py install), or start the session in this folder`.
 
 ## 7. Conventions
 
-- English for code, comments, prompts and docs; the repository's existing style.
-- Standard library only. `findings.py` keeps no import from the flow.
-- No line over 120 characters in any file you touch; functions ≤ 60 lines, nesting ≤ 4 (`agentic.py quality`).
-- Every limit is a named module constant with a one-line comment.
-- The JS mirror and the Python helper keep the same names (camelCase in JS) and the same behaviour; a comment above the JS mirror names the Python function.
-- A command that analyses never stops the flow: on error it prints its empty shape with `error` and exits 0.
-- Docs and notes never name a flow version except in `upgrade.NOTES` and `plugin.json`.
-- Commit messages: `type: summary` in lowercase (`feat:`, `fix:`, `test:`, `release:`, `design:`, `chore:`), ending with the session's attribution lines.
+- English for code, comments and docs; the repository's existing style.
+- Standard library only. `hook.py` stays Python 3.9, no annotations, no flow import.
+- No line over 120 characters; functions ≤ 60 lines; nesting ≤ 4 (`agentic.py quality`).
+- Every literal that decides behaviour is a named module constant with a comment.
+- Docs and notes name no flow version outside `upgrade.NOTES` and `plugin.json`.
+- Commits: `type: summary` in lowercase, ending with the session's attribution lines.
 
 ## 8. Work packages and acceptance criteria
 
 ### Acceptance criteria
 
-- AC-001 · A pinned reflex finding goes to pending without a fix, in both engines (the bug of issue 145)
-  - Scenario: Annex A scenario "a reflex finding pinned by an acceptance test goes to pending". Today both engines send the finding to WP-02 as a fix.
-  - Action: the fallback engine runs it (`test_pipeline.run_scenario`, and `test_pipeline.world` + `pipeline.Pipeline` for the full result); the native one through `node .claude/bin/test_workflow.mjs --dump`.
-  - Expected: the gates contain `pinned src/b/x.py:3` exactly once; `fix_cycles` 0; `result` `REVIEW`; `pending` types `["acceptance conflict"]`; that item has `wp` `WP-02`, `file` `/repo/src/b/x.py`, `tier` `reflex`, `pinned_by` `{"test": "acceptance/test_x.py", "test_line": 12, "text": "limit(10000"}` and `decision` equal to `findings.ACCEPTANCE_CONFLICT_DECISION`; in the full result `review.standards.confirmed` is `[]`, `review.standards.pinned` has 1 item, and `launch._record_items(result, "STANDARDS", False)` (what a hand fix reads) is `[]`. Both engines agree on result, failed_stage, detail, fix_cycles, pending, gates, gate_calls, agents and prompts.
-  - Must not: any implementer call labelled `(fix)`; a `fix limit reached` item; the result `OK`.
-  - Check: `test_pinned_conflict.py`, AC-001 tests.
-  - WP: WP-02
-- AC-002 · A `pinned` step that fails or answers no JSON changes nothing
-  - Scenario: Annex A scenario "a pinned step that cannot answer leaves the finding to be fixed".
-  - Action: both engines run it.
-  - Expected: the gates contain `pinned src/b/x.py:3` exactly once; `fix_cycles` 1; `result` `OK`; `pending` `[]`; both engines agree as in AC-001.
-  - Must not: a stop; an `acceptance conflict` item.
-  - Check: `test_pinned_conflict.py`, AC-002 tests.
-  - WP: WP-02
-- AC-003 · Only Standards reflex findings with a line and a passable path are checked
-  - Scenario: Annex A scenario "only reflex findings with a line are checked for pins"; the default happy path (no findings); unit calls of the helpers.
-  - Action: both engines run the two runs; `findings.pinned_args` and `findings.split_pinned` are called directly.
-  - Expected: in the scenario, no gate starts with `pinned`, `fix_cycles` 1, `result` `OK`. The happy path makes no `pinned` call (the native engine's 10 gatekeeper calls stand). `pinned_args` of `[reflex line 3 file "/repo/src/a.py", reflex line 3 same file, reflex line True, reflex line 0, finish line 3, reflex file "src/a b.py" line 3, reflex file "../x.py" line 3, reflex with no line]` with root `/repo` is `["src/a.py:3"]`; 45 distinct reflex findings with lines give 40 arguments. `split_pinned` with the answers `None`, `{}`, `{"pinned": "x"}` and `{"pinned": [{"file": "src/a.py", "line": "3", "test": "t", "test_line": 1, "text": "x"}]}` pins nothing and returns the same objects. `findings.PIN_PATH == repo_scan.PIN_PATH`.
-  - Must not: a spec, floor or finish finding checked; a finding pinned by an entry for another line.
-  - Check: `test_pinned_conflict.py`, AC-003 tests.
-  - WP: WP-02
-- AC-004 · A pinned finding leaves the re-review and stays pending while another is fixed
-  - Scenario: Annex A scenario "a pinned finding is not re-reviewed and stays pending".
-  - Action: both engines run it.
-  - Expected: the gate `pinned src/b/x.py:3 src/b/x.py:9` exactly once; one fix cycle (a `WP-02 (fix)` call); the standards re-review prompt contains the fingerprint (`findings.fingerprint` of the finding with `"axis": "standards"`) of the line-9 finding and not that of the line-3 one; `result` `REVIEW`; `pending` `["acceptance conflict"]`; both engines agree as in AC-001.
-  - Must not: a second `pinned` gate (nothing reflex is left confirmed after the re-review); the line-3 finding's problem text in a fix prompt.
-  - Check: `test_pinned_conflict.py`, AC-004 tests.
-  - WP: WP-02
-- AC-005 · `pinned` finds a literal of an acceptance test on the finding's line
-  - Scenario: a temporary repo (the `Repo` of `test_agentic.py`, whose manifest has `acceptance.files` = `["acceptance/"]`). `src/w.ps1`: line 1 `param()`, line 2 `  $n.ShowBalloonTip(10000, 'a', 'b', 'Info')`, line 3 `# end`, line 4 `Write-Output ('ok')`. `acceptance/t.Tests.ps1`: line 1 `$src = Get-Content "$PSScriptRoot/../src/w.ps1" -Raw`, lines 2-4 `# t`, line 5 `        $src | Should -Match 'ShowBalloonTip\(10000'`. `tests/u.Tests.ps1` (outside the zone) line 1: `"Write-Output ('ok')"`.
-  - Action: `agentic.py pinned src/w.ps1:2`, then `agentic.py pinned src/w.ps1:4`.
-  - Expected: the first prints, as its last stdout line, `{"pinned": [{"file": "src/w.ps1", "line": 2, "test": "acceptance/t.Tests.ps1", "test_line": 5, "text": "ShowBalloonTip(10000"}], "skipped": []}`, exit 0. The second prints `{"pinned": [], "skipped": []}`, exit 0 (line 4 is two lines from line 2; the literal that matches line 4 sits outside the zone).
-  - Must not: a pin from a file outside the acceptance zone; an exit other than 0.
-  - Check: `test_pinned_conflict.py`, AC-005 tests.
+- AC-001 · In a worktree under `.claude/worktrees/`, the hook writes its heartbeat in the worktree and `hooks-check` passes (the bug)
+  - Scenario: a temporary git repo with `.claude/bin` (a copy of this checkout's, without tests), `.claude/settings.json`, `.claude/agents` and `architecture.md` holding `test_agentic.MANIFEST`, all committed; `git worktree add <repo>/.claude/worktrees/w -b w`.
+  - Action: run `<repo>/.claude/bin/hook.py` with `CLAUDE_PROJECT_DIR=<repo>`, cwd `<repo>` and stdin `{"tool_name": "Bash", "tool_input": {"command": "ls"}, "session_id": "s1", "cwd": "<repo>/.claude/worktrees/w"}`; then, from the worktree, `python3 .claude/bin/agentic.py hooks-check` with `CLAUDECODE=1` and no `CLAUDE_PROJECT_DIR`.
+  - Expected: the hook exits 0; `<worktree>/.claude/state/hook-seen.json` exists with `tool` `Bash`; `hooks-check` exits 0 with `"mode": "live"`.
+  - Must not: `<repo>/.claude/state/hook-seen.json` created or changed.
+  - Check: `test_worktree_hook.py`, AC-001 tests.
   - WP: WP-01
-- AC-006 · `pinned` ignores weak fragments, skips bad arguments, and never fails
-  - Scenario: the repo of AC-005, with `acceptance/t.Tests.ps1` lines 6-8: `'ShowBalloonTip'`, `'(10000'`, `'*Get-Item -Path*'`, and line 9 `$v = Get-Content "$PSScriptRoot/../src/v.ps1" -Raw`; `src/v.ps1` line 1 `ShowBalloonTip ; (10000 ; Get-Item -Path x`; `src/m.ps1` line 1 `throw "bad (input) value"`; `acceptance/b.Tests.ps1` line 1 `{ Invoke-M } | Should -Throw "bad (input) value"` (a behavioural test: it reads no file and does not name `m.ps1`).
-  - Action: `agentic.py pinned src/v.ps1:1 src/m.ps1:1 src/w.ps1:0 src/w.ps1:x ../w.ps1:2 src/none.ps1:1 src/w.ps1 src/w.ps1:2 src/w.ps1:2`; then `agentic.py pinned src/w.ps1:2` in a repo whose `architecture.md` has no manifest block and which also holds `src/w.ps1`.
-  - Expected: the first prints `{"pinned": [<the AC-005 pin>], "skipped": ["src/w.ps1:0", "src/w.ps1:x", "../w.ps1:2", "src/none.ps1:1", "src/w.ps1"]}` (nothing for `src/v.ps1:1` nor for `src/m.ps1:1`; `src/w.ps1:2` once), exit 0. The second: exit 0, a last line with `"pinned": []` and a string `error`.
-  - Must not: a pin from a fragment shorter than 8 characters or without a character of `()[]{}=;`; a pin from a test file that does not read a file as text or does not name the finding's file; a traceback with a non-zero exit.
-  - Check: `test_pinned_conflict.py`, AC-006 tests.
+- AC-002 · A package's write in the worktree is judged against the worktree's manifest and paths
+  - Scenario: the repo of AC-001; the worktree's architecture.md is the committed one.
+  - Action: (a) the fallback: `hook.py` with `AGENTIC_WP=WP-01`, `CLAUDE_PROJECT_DIR=<worktree>` (what the launcher sets) and a `Write` payload for `<worktree>/src/a.py`, then for `<worktree>/src/c.py`, each with `"cwd": "<worktree>"` and `content` `"x = 1\n"`. (b) the native engine: with `CLAUDE_PROJECT_DIR=<repo>`, first a main-thread call (AC-001's payload, `session_id` `s1`), then an agent call `{"tool_name": "Bash", "tool_input": {"command": "python3 .claude/bin/agentic.py claim WP-01"}, "session_id": "s1", "agent_id": "a1", "agent_type": "implementer", "cwd": "<worktree>"}`, then the two `Write` payloads with the same `session_id`, `agent_id` and `agent_type`.
+  - Expected: in (a) and (b), the write to `src/a.py` exits 0 and the write to `src/c.py` exits 2 with `does not own src/c.py` in stderr; in (b) `<worktree>/.claude/state/claims.json` names `a1`.
+  - Must not: either stderr containing `.claude/worktrees`.
+  - Note: (a) runs the worktree's `hook.py` (the launcher points `CLAUDE_PROJECT_DIR` at the worktree) and already passes today: it guards against a regression; (b) runs `<repo>`'s `hook.py` and is red today.
+  - Check: `test_worktree_hook.py`, AC-002 tests.
   - WP: WP-01
-- AC-007 · The test-author and the test-auditor are told
-  - Scenario: the repository's definitions.
-  - Action: read `.claude/agents/test-author.md` and `.claude/agents/test-auditor.md`.
-  - Expected: `test-author.md` has a line that contains both `source text` and `section 7`; `test-auditor.md` has a line that starts with `   - **Pins the code's form:**` and contains `High`, and the first bullet under its `# Severity` heading contains `pins a form`.
-  - Must not: the checklist item outside the numbered step 3 of the auditor's process (it must sit after the **Wrong** item).
-  - Check: `test_pinned_conflict.py`, AC-007 test.
-  - WP: WP-03
-- AC-008 · Release 2.22.1
+- AC-003 · A worktree outside the main checkout works the same way
+  - Scenario: the repo of AC-001 plus `git worktree add <tmp>/outside -b o`, `<tmp>` another temporary folder.
+  - Action: AC-001's hook call with `"cwd": "<tmp>/outside"`.
+  - Expected: `<tmp>/outside/.claude/state/hook-seen.json` exists; the main checkout's does not.
+  - Must not: the main checkout's heartbeat.
+  - Check: `test_worktree_hook.py`, AC-003 test.
+  - WP: WP-01
+- AC-004 · Outside a linked worktree of the same repository with the flow, nothing changes
+  - Scenario: the repo of AC-001; another git repo `<other>` with a worktree `<other>/wt` holding a copy of `.claude/bin`; a worktree `<repo>/.claude/worktrees/bare` from which `.claude/bin/agentic.py` was deleted; a submodule-like folder whose `.git` file says `gitdir: ../.git/modules/m`.
+  - Action: `hook.choose_root(raw, <repo>, {})` (main-thread payloads, no `session_id`) for `cwd` = `<repo>`, `<repo>/src`, `<other>/wt`, `<repo>/.claude/worktrees/bare`, the submodule folder, a folder with no git, and for `raw` = `b"not json"`, `b"[]"`, `b'{"cwd": 3}'`; and `hook.py` run with `AGENTIC_WP=WP-01` and stdin `not json`.
+  - Expected: every `choose_root` call returns `<repo>`; `choose_root` with `cwd` = `<repo>/.claude/worktrees/w/src` returns the `w` worktree. The `hook.py` run exits 2 with `guardrail error, blocked for safety` in stderr (today's answer).
+  - Must not: an exception from `choose_root` or `linked_worktree`.
+  - Check: `test_worktree_hook.py`, AC-004 tests.
+  - WP: WP-01
+- AC-008 · An agent cannot change guard by changing directory
+  - Scenario: the repo of AC-001 with a second worktree `<repo>/.claude/worktrees/x -b x`; with `CLAUDE_PROJECT_DIR=<repo>`, a main-thread call of session `s1` with `cwd` = the `w` worktree.
+  - Action: (a) AC-002 (b)'s claim call (`agent_id` `a1`, `agent_type` `implementer`, `AGENTIC_WP` unset), then a call of the same agent with `cwd` = `<repo>/.claude/worktrees/x` and a `Write` for `<repo>/.claude/worktrees/x/src/a.py`; (b) an agent call of a session with no main-thread call (`session_id` `s2`) with `cwd` = the `w` worktree; (c) `AGENTIC_WP=WP-01`, `CLAUDE_PROJECT_DIR=<repo>` and `cwd` = the `w` worktree; (d) `choose_root` for (a), (b) and (c).
+  - Expected: (a) exits 2 with `you cannot write outside the repo` (judged in `w`); `<repo>/.claude/worktrees/x/.claude/state/` has no `hook-seen.json`. (d) returns the `w` worktree for (a) and `<repo>` for (b) and (c). `<repo>/.claude/state/worktree-roots.json` holds `s1` with the `w` worktree's root.
+  - Must not: the `x` worktree's guard judging an agent of `s1`; an agent call writing `worktree-roots.json`.
+  - Check: `test_worktree_hook.py`, AC-008 tests.
+  - WP: WP-01
+- AC-009 · An older `hook.py` beside the new `core.py` keeps today's root and the guard still blocks
+  - Scenario: the repo of AC-001 whose `.claude/bin/hook.py` is replaced by the version of commit `0c5928b` (`git show 0c5928b:.claude/bin/hook.py` in this repository; it has no `linked_worktree`), uncommitted.
+  - Action: `python3 -c "import sys; sys.path.insert(0, '<repo>/.claude/bin'); import core; print(core.ROOT)"` with `CLAUDE_PROJECT_DIR=<repo>`; then `python3 <repo>/.claude/bin/agentic.py hook` with `AGENTIC_WP=WP-01`, `CLAUDE_PROJECT_DIR=<repo>` and a `Write` payload for `<repo>/src/c.py`.
+  - Expected: the first prints `<repo>` and exits 0; the second exits 2 with `does not own src/c.py`.
+  - Must not: an `ImportError` traceback; an exit of 1 from the hook.
+  - Check: `test_worktree_hook.py`, AC-009 test.
+  - WP: WP-02
+- AC-005 · `core.ROOT` is the worktree when `CLAUDE_PROJECT_DIR` names the main checkout but the script lives in the worktree
+  - Scenario: the repo and worktree of AC-001.
+  - Action: `python3 -c "import sys; sys.path.insert(0, '<dir>/.claude/bin'); import core; print(core.ROOT)"` run (a) with `<dir>` = the worktree, `CLAUDE_PROJECT_DIR=<repo>`; (b) with `<dir>` = `<repo>`, `CLAUDE_PROJECT_DIR=<repo>`; (c) with `<dir>` = the worktree and no `CLAUDE_PROJECT_DIR`; (d) with `<dir>` = a copy of `.claude/bin` outside any repo, `CLAUDE_PROJECT_DIR=<repo>`.
+  - Expected: (a) the worktree; (b) `<repo>`; (c) the worktree; (d) `<repo>` (each compared resolved).
+  - Must not: (a) printing `<repo>`.
+  - Check: `test_worktree_hook.py`, AC-005 tests.
+  - WP: WP-02
+- AC-006 · The diagnosis says where to update the flow
+  - Scenario: `test_hook_diagnosis.py`'s worktree setup (the worktree's heartbeat absent, the main one fresh).
+  - Action: `hooks-check` from the worktree with `CLAUDECODE=1`.
+  - Expected: exit 3; one hint contains `different project roots`, `hook-seen.json` and `update the flow there`.
+  - Must not: the hint missing.
+  - Check: `test_worktree_hook.py`, AC-006 test.
+  - WP: WP-02
+- AC-007 · Release 2.22.2
   - Scenario: the repository.
-  - Action: read the release files; run `python3 .claude/bin/agentic.py quality`.
-  - Expected: `.claude-plugin/plugin.json`'s version, as a tuple of ints, is ≥ `(2, 22, 1)`; `upgrade.NOTES["2.22.1"]` exists, its key comes right before `"2.22.0"` in `list(upgrade.NOTES)`, some note contains `acceptance conflict` and some contains `pinned`; `.claude/commands/implement.md` has exactly one line containing `` `acceptance conflict` ``; `docs/how-it-works.md` contains `acceptance conflict` and `agentic.py pinned` and does not contain `2.22.1`; `quality` exits 0.
-  - Must not: a line of `test_acceptance_v222.py` that contains both `plugin["version"]` and `"2.22.0"`.
-  - Check: `test_pinned_conflict.py`, AC-008 test (flow repo only).
+  - Action: read the release files; run `agentic.py quality`.
+  - Expected: `plugin.json`'s version as a tuple of ints ≥ `(2, 22, 2)`; `upgrade.NOTES["2.22.2"]` exists, comes right before `"2.22.1"`, and some note contains `worktree`; `docs/how-it-works.md` contains `worktree` and `cwd` and does not contain `2.22.2`; `quality` exits 0.
+  - Must not: a line of `test_acceptance_v222.py` containing both `plugin[` and `"2.22.1"`.
+  - Check: `test_worktree_hook.py`, AC-007 test (flow repo only).
   - WP: WP-03
 
 ### Work packages
 
-#### WP-01 · The `pinned` command
+#### WP-01 · The hook follows the call's worktree
 - Wave 1.
-- Files: `.claude/bin/repo_scan.py`, `.claude/bin/agentic.py`, `.claude/bin/launch.py`, `.claude/bin/test_pinned.py`, `.claude/bin/test_definitions.py` (line 510 only: `37` → `38`).
-- Implements C1. Defines its own `PIN_PATH` (section 5); it imports nothing from `findings.py`.
-- ACs: AC-005, AC-006.
-- **Patterns to mirror:** `.claude/bin/repo_scan.py:270-283` (the command's shape, stderr warning, exit 0); `.claude/bin/repo_scan.py:178-186` (constants); `.claude/bin/agentic.py:315-316` and `.claude/bin/agentic.py:427-439` (wrapper and table); `.claude/bin/test_agentic.py:906-916` (a command test in a temporary `Repo`).
+- Files: `.claude/bin/test_worktree_root.py`; and `.claude/bin/hook.py`, by hand (never owned: no package may own it).
+- Implements C1, C2, C3.
+- ACs: AC-001, AC-002, AC-003, AC-004, AC-008.
+- **Patterns to mirror:** `.claude/bin/hook.py:1-29` (style, fail closed); `.claude/bin/test_hook_diagnosis.py:120-145` (worktrees in tests); `.claude/bin/test_hook_path.py:27-40` (a repo with the flow).
 - **Gotchas:**
-  - `pinned(args)` takes the argument list: `cmd_pinned(args)` calls `pinned(args)`.
-  - Print the JSON with `ensure_ascii=False` and call `sys.exit(0)` at the end, as `callers` does.
-  - `load_manifest()` raises `ManifestError` when the block is missing: that is the "unexpected exception" path (error JSON, exit 0).
-  - Fragments come from the test's literal only; the source window is searched for the fragment as a plain substring.
-  - Known red before integration (not yours to fix; never touch `flow-budget.json`): the AC-001..004 tests of `test_pinned_conflict.py` and its `PIN_PATH` equality check (WP-02), and `test_lean` (the budget, WP-03). Any other red test is yours.
-- **WP validation note:** run `test_pinned.py` first; the full suite is only expected green after integration.
-- **Exact imports and APIs:** add `at_entity` to the existing `from core import (...)` block (`load_manifest`, `owns`, `source_files`, `ROOT` are already there); `re`, `json`, `sys` are already imported.
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_pinned.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
+  - Read stdin as bytes once (`sys.stdin.buffer.read()`); the guard reads `sys.stdin.buffer` again, so hand it a `TextIOWrapper(BytesIO(raw), encoding="utf-8")`.
+  - Set `CLAUDE_PROJECT_DIR` only when the worktree was chosen, before `runpy`: `core.ROOT` is computed when the worktree's `core` is imported.
+  - A worktree's `.git` file uses forward slashes on Windows too (`gitdir: C:/…/.git/worktrees/w`); `Path` reads both.
+  - `Path.resolve()` on Windows may change the drive letter's case: compare resolved paths only.
+  - Keep `hook.py` free of flow imports; `json`, `io`, `runpy` and `time` are standard.
+  - Only main-thread calls write `worktree-roots.json`; an agent's call only reads it.
+  - Commit `hook.py` first: WP-02's `core.py` imports `linked_worktree` from it, so the order is a dependency, not a style.
+  - Known red until the later waves: AC-005, AC-006, AC-009 (WP-02), AC-007 and `test_lean`/`test_lean_hook`'s budget checks (WP-03).
+- **Exact imports and APIs:** `import io, json, os, runpy, sys, time`; `from pathlib import Path`.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_worktree_root.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
-#### WP-02 · Both engines route a pinned finding to pending
-- Wave 1.
-- Files: `.claude/bin/findings.py`, `.claude/bin/pipeline.py`, `.claude/workflows/agentic-implement.js`, `.claude/bin/conformance.json`, `.claude/bin/test_pipeline.py`, `.claude/bin/test_workflow.mjs`, `.claude/bin/test_pinned_findings.py`.
-- Implements C2 and C3; consumes C1 by signature (its output shape; the simulated worlds answer for it).
-- ACs: AC-001, AC-002, AC-003, AC-004.
-- **Patterns to mirror:** `.claude/bin/findings.py:168-190` (a helper and its constant); `.claude/workflows/agentic-implement.js:219-232` (the JS mirror); `.claude/workflows/agentic-implement.js:709-722` and `.claude/bin/pipeline.py:570-576` (the close you change); `.claude/bin/test_owner_split.py:1-30` (unit tests of helpers); `.claude/bin/test_pipeline.py:54-78` (the world's defaults).
+#### WP-02 · `core.ROOT` and the diagnosis follow the worktree
+- Wave 2 (`core.py` imports `linked_worktree` from WP-01's `hook.py` at module level: without it every flow module fails to import).
+- Files: `.claude/bin/core.py`, `.claude/bin/guardrail.py`, `.claude/bin/test_core_root.py`.
+- Implements C4, C5. Consumes C1 by implementation (`depends_on`: WP-01).
+- ACs: AC-005, AC-006, AC-009.
+- **Patterns to mirror:** `.claude/bin/core.py:18-24` (the root constants); `.claude/bin/core.py:174-186` (`root_drift`, unchanged); `.claude/bin/guardrail.py:545-560` (the hints).
 - **Gotchas:**
-  - The check runs in the close, after the verifiers: a pinned finding was confirmed first (a refuted one is never checked).
-  - In the re-review, `closeReview` receives the still-confirmed findings of every package (not only the fixed ones): any reflex one with a line is checked again. That is intended (a fix may have restored a pinned form).
-  - `run.review` already exists when `closeReview` runs, in both paths; overwrite `standards.confirmed` and `confirmed`, and set `standards.pinned` even when empty.
-  - The gate call is a lone command, not part of the close's `seq`: the close's `REVIEW=` mark depends on its answer.
-  - Existing scenarios with a reflex finding with a line (for example "a reflex finding blocks until it is fixed") now make one more gate call in both engines; they keep passing because the engines are compared with each other and the default answer pins nothing.
-  - `agentic-implement.js` may not gain a line over 120 characters (64 stored). Its line allowance is 920; keep the mirrors compact (one line per short helper, as `tierOf` and `inScope` are). If it still ends above 920, `.claude/quality-baseline.json`'s `lines` for that file is set by hand to the measured count in WP-02's commit, saying why; never any other entry, never `long_lines`.
-  - Known red before integration (not yours to fix; never touch `flow-budget.json`): every test of `test_pinned_conflict.py` except AC-001..004 and AC-003's `PIN_PATH` equality; `test_lean` (the budget, WP-03); and, without WP-01, `test_definitions.py`'s `test_workflow_calls_existing_commands` and `test_cited_commands_exist` (`pinned` is not a command yet). Any other red test is yours.
-  - New engine tests go in `test_pinned_findings.py` or `test_workflow.mjs`, not in `test_pipeline.py` (732 lines, limit 800).
-  - `test_pinned_findings.py` also reads `agentic-implement.js` as text and checks that its `PIN_PATH`, `PIN_MAX_ARGS` and `ACCEPTANCE_CONFLICT_DECISION` literals equal the Python ones.
-  - Python `bool` is an `int`: exclude it explicitly.
-  - JS `str(plan.root)` is the existing helper (`.claude/workflows/agentic-implement.js:193`).
-- **Exact imports and APIs:** in `pipeline.py`, extend `from findings import (...)` with `conflict_item, pinned_args, split_pinned`; `lines_json` (already imported from `pipeline_parts`) parses the answer; `self.seq([cmd], "pinned")`, `self.step(res, 0)`, `self.ok(st)`, `pending_key`. In the workflow: `seq`, `step`, `ok`, `lastJson`, `pendingKey`, `noRoot`, `str`.
-- **The JS item:** add a test to `test_workflow.mjs` that runs Annex A's first scenario and checks the `acceptance conflict` item's `pinned_by` and `decision` (the dump shows only pending types).
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_pinned_findings.py`; `node .claude/bin/test_workflow.mjs`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
+  - `core` is imported by every flow module and by the hook: the import of `hook` must stay cheap (no git, a few `stat` calls).
+  - `from hook import linked_worktree` works because `core.py` already puts its folder on `sys.path` (`.claude/bin/core.py:15`).
+  - Known red until WP-03: `test_lean` (the budget) and AC-007.
+- **Exact imports and APIs:** after the `compat` import, `try: from hook import linked_worktree  # noqa: E402` and `except ImportError: linked_worktree = None` (with a comment saying why).
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_core_root.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
-#### WP-03 · Definitions, documentation and release 2.22.1
-- Wave 2 (it measures the code and prompts the other packages changed).
-- Files: `.claude/agents/test-author.md`, `.claude/agents/test-auditor.md`, `.claude/commands/implement.md`, `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v222.py`.
-- Depends on WP-01 and WP-02 by implementation (the budget counts their lines; the docs describe their behaviour).
-- ACs: AC-007, AC-008.
-- **Patterns to mirror:** `.claude/bin/upgrade.py:156-163` (a release's notes); `.claude/commands/implement.md:63-67` (pending bullets); `.claude/agents/test-auditor.md:20-36` (checklist and severity); `.claude/agents/test-author.md:17-25` (rules).
-- **What to write:**
-  - `test-author.md`, rule 2 gains: "Do not assert on the source text of production code when the behaviour can be observed through section 6. When a criterion can only be checked by reading the source, assert the smallest fragment it needs, and never pin a form that section 7 or the rules forbid (a bare literal where a named constant is required, for example): the implementer could not satisfy both." (The line must contain `source text` and `section 7`.)
-  - `test-auditor.md`, a new checklist item after **Wrong**: `   - **Pins the code's form:** a test that reads a production file as text and asserts a fragment of it. High when the fragment holds a form section 7 or the rules forbid (the fix the Standards reviewer would ask for breaks the test); medium when the behaviour could be observed through section 6 instead.` The severity section's first bullet gains: `, or a test that pins a form section 7 or the rules forbid`.
-  - `implement.md`, a pending bullet after **Concerns**: `  - **Acceptance conflicts** (items of type `acceptance conflict`): a Standards finding on a line whose text an acceptance test pins (`pinned_by`: the test, its line and the text). No fix was attempted: the person changes the test to check behaviour, or adds a waiver for that rule and file.` And the Review bullet for Standards adds `and the findings an acceptance test pins (`pinned`)`.
-  - `how-it-works.md`: a paragraph after the fix-cycle paragraph (line 155) explaining `agentic.py pinned`, the reflex-with-a-line candidates, the literal heuristic and its limits (no regex literals, no variables), the `acceptance conflict` item, and the two prevention rules. No version number.
-  - `plugin.json` → `2.22.1`; `upgrade.NOTES["2.22.1"]` before `"2.22.0"`, two notes (the detection with `acceptance conflict` and `agentic.py pinned`; the test-author and test-auditor rules), naming issue 145.
-  - `flow-budget.json`: re-measure with `python3 -c "import sys; sys.path.insert(0, '.claude/bin'); import test_lean; from pathlib import Path; print(test_lean.code_lines(Path('.')), test_lean.prompt_bytes(Path('.')))"`, and write the `why` for 2.22.1 (design 0033), with the measured deltas.
-  - `test_acceptance_v222.py:229`: `"2.22.0"` → `"2.22.1"`, nothing else.
-- **Gotchas:** `test_acceptance_v222.py` forbids any other test file from pinning `"2.22.0"` or `"2.21.2"` in a line with `version`. `test_lean.py` holds the budget to a two-sided 5 % band: measure after WP-01 and WP-02 are in.
+#### WP-03 · Documentation and release 2.22.2
+- Wave 3 (it measures the budget after WP-01 and WP-02).
+- Files: `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v222.py`.
+- Depends on WP-01 and WP-02 by implementation.
+- ACs: AC-007.
+- **Patterns to mirror:** `.claude/bin/upgrade.py:156-165`.
+- **What to write:** a paragraph in `how-it-works.md` (section 4, guardrails): in a worktree the hook reads the call's `cwd` and judges with that worktree's guard and root; `CLAUDE_PROJECT_DIR` names the checkout the session started in, so that checkout's `hook.py` must be this release or later. `NOTES["2.22.2"]`: one note naming `worktree`. The budget: measured with `test_lean.code_lines(Path('.'))` and `test_lean.prompt_bytes(Path('.'))`, with a `why`.
 - **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 -m unittest discover -s acceptance`; `python3 -m unittest discover -s qa`; `python3 .claude/bin/agentic.py quality`.
 
 ```json wp-manifest
 {
   "maintainer": true,
-  "stack": ["python", "typescript"],
+  "stack": ["python"],
   "allow_bash": ["Bash(python3 -m unittest:*)", "Bash(node .claude/bin/test_workflow.mjs)", "Bash(python3 .claude/bin/agentic.py quality)"],
-  "acceptance": {"files": [".claude/bin/test_pinned_conflict.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_pinned_conflict.py"},
+  "acceptance": {"files": [".claude/bin/test_worktree_hook.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_worktree_hook.py"},
   "verify": {"build": "python3 -m unittest discover -s bench -p \"test_*.py\"", "lint": "node .claude/bin/test_workflow.mjs", "types": "python3 -m unittest discover -s bench/acceptance", "tests": "python3 -m unittest discover -s .claude/bin -p \"test_*.py\""},
   "docs": {"files": ["docs/assets/"], "codemap": null},
   "work_packages": [
-    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/repo_scan.py", ".claude/bin/agentic.py", ".claude/bin/launch.py", ".claude/bin/test_pinned.py", ".claude/bin/test_definitions.py"],
-     "acs": ["AC-005", "AC-006"], "mirror": [".claude/bin/repo_scan.py:270-283", ".claude/bin/repo_scan.py:178-186", ".claude/bin/agentic.py:315-316", ".claude/bin/agentic.py:427-439", ".claude/bin/test_agentic.py:906-916"]},
-    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/findings.py", ".claude/bin/pipeline.py", ".claude/workflows/agentic-implement.js", ".claude/bin/conformance.json", ".claude/bin/test_pipeline.py", ".claude/bin/test_workflow.mjs", ".claude/bin/test_pinned_findings.py"],
-     "acs": ["AC-001", "AC-002", "AC-003", "AC-004"], "mirror": [".claude/bin/findings.py:168-190", ".claude/workflows/agentic-implement.js:219-232", ".claude/workflows/agentic-implement.js:709-722", ".claude/bin/pipeline.py:570-576", ".claude/bin/test_owner_split.py:1-30", ".claude/bin/test_pipeline.py:54-78"]},
-    {"id": "WP-03", "wave": 2, "depends_on": ["WP-01", "WP-02"], "files": [".claude/agents/test-author.md", ".claude/agents/test-auditor.md", ".claude/commands/implement.md", "docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
-     "acs": ["AC-007", "AC-008"], "mirror": [".claude/bin/upgrade.py:156-163", ".claude/commands/implement.md:63-67", ".claude/agents/test-auditor.md:20-36", ".claude/agents/test-author.md:17-25"]}
+    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/test_worktree_root.py"],
+     "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-008"], "mirror": [".claude/bin/hook.py:1-29", ".claude/bin/test_hook_diagnosis.py:120-145", ".claude/bin/test_hook_path.py:27-40"]},
+    {"id": "WP-02", "wave": 2, "depends_on": ["WP-01"], "files": [".claude/bin/core.py", ".claude/bin/guardrail.py", ".claude/bin/test_core_root.py"],
+     "acs": ["AC-005", "AC-006", "AC-009"], "mirror": [".claude/bin/core.py:18-24", ".claude/bin/core.py:174-186", ".claude/bin/guardrail.py:545-560"]},
+    {"id": "WP-03", "wave": 3, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
+     "acs": ["AC-007"], "mirror": [".claude/bin/upgrade.py:156-165"]}
   ]
 }
 ```
 
 ## 9. Test strategy
 
-- **Unit:** WP-01 in `test_pinned.py` (`pin_fragments`, `find_pins` and the command through `Repo`); WP-02 in `test_pinned_findings.py` (`pin_path`, `pinned_args`, `split_pinned`, `conflict_item`). The JS mirrors are held equal by the conformance scenarios (`test_pipeline.ConformanceTests`).
-- **Acceptance (AT, wave 0):** `.claude/bin/test_pinned_conflict.py`, written before the code, red until WP-01 and WP-02 exist. Engine criteria use the scenario names of Annex A with `test_pipeline.run_scenario` and `node .claude/bin/test_workflow.mjs --dump` (skip the native half without `node`, as `test_acceptance_v222.EngineCase` does); the full fallback result (for `pending` items and `review`) comes from `test_pipeline.world(decl)` and `pipeline.Pipeline(test_pipeline.SPEC, gate, agent, parallel=lambda thunks: [t() for t in thunks]).execute()`. A missing scenario raises an `AssertionError` that names it (red for the right reason). AC-008 is skipped outside the flow repo (`core.is_flow_repo`). The AT must not pin `"2.22.0"` or `"2.21.2"` in a line with `version`.
-- **QA:** exploratory: a temporary repo with a Python test pinning `"MAX = 3"` style text and a PowerShell one, the command run by hand; the gate's `seq pinned ...` form; a finding with an absolute Windows path and a root of another case.
-- Everything runs with the commands of section 3. Executed by hand, as every design that touches `.claude/` (design 0016).
+- **Unit:** WP-01 in `test_worktree_root.py` (`linked_worktree` over real `git worktree add` folders and hand-written `.git` files; `choose_root` over byte payloads); WP-02 in `test_core_root.py` (`project_root` in subprocesses, since `ROOT` is fixed at import).
+- **Acceptance (AT, wave 0):** `.claude/bin/test_worktree_hook.py`, red today: AC-001's heartbeat lands in the main checkout, AC-002 (b)'s writes are refused as `.claude/` paths, `choose_root` does not exist. Repos are built in temporary folders with `git init`, a copy of `.claude/bin` without `test_*.py` and `__pycache__`, `.claude/settings.json`, `.claude/agents`, and `architecture.md` holding `test_agentic.MANIFEST`, committed with `GIT` from `test_hook_diagnosis.py`. `hook.py` is run with `sys.executable`. AC-007 is skipped outside the flow repo. The AT must not write `"2.21.2"`, `"2.22.0"` or `"2.22.1"` on a line containing `version`: the earlier acceptance files forbid it.
+- **QA:** a real `claude --worktree` session is out of reach in CI; QA checks a Windows-style `.git` file (`gitdir: C:/…`) and a relative `gitdir`.
+- Executed by hand (`"maintainer": true`).
 
 ## 10. Decisions
 
 | Decision | Discarded | Why |
 |---|---|---|
-| The conflict is a blocking pending item (`acceptance conflict`, tier reflex) | Non-blocking item; an automatic waiver | User's choice. A waiver needs who decided (`validate` demands it); an acceptance test that pins form may itself be wrong. |
-| Deterministic detection by a command | The implementer declares a conflict in its fix report; the Standards reviewer marks `pinned_by` | User's choice. Neither depends on an agent following a new instruction; the implementer route still spends the cycle the issue complains about. |
-| Prevention in the test-author and a narrow auditor finding | Auditor blocks every source-text assertion; no prevention | User's choice. A blanket rule would stop wave 0 for legitimate static checks ("does not call Invoke-Expression") after one revision. |
-| Only Standards reflex findings with a line | Spec and floor findings too | A pin never excuses a correctness or security defect; reflex is the tier a waiver could cover. |
-| One check point, the review's close | Before the verifiers (saves a verifier call) | One insertion point per engine covers the full review and the re-review alike; the verifier call is the price. |
-| Fragment must hold one of `()[]{}=;` and 8+ characters; window ±1 line | Any literal; exact line only; ±2 | Messages and names in tests (`'Get-Item -Path'`, `"file not found"`) would otherwise pin lines their tests only observe; a reviewer's line can be one off. The thresholds are not measured. |
-| Only a test file that reads a file as text (`PIN_READ_RE`) and names the finding's file can pin it | Any acceptance file; also requiring the fragment to share a token with the finding's text | User's choice, to cut false positives: a behavioural test whose message or call happens to match the line never reads the source. The token rule was discarded: a function-length finding names the function its pinned signature holds. The residual case (a static test pinning a part of the line the fix would not touch) goes to a person; the alternative, one fix attempt before routing, was declined as too much machinery for a rare case. |
-| Paths matching `PIN_PATH` only | Quoting arguments | The fallback splits with `shlex` and the workflow's gatekeeper copies the command; a path with spaces would break both. Such findings behave as today. |
-| A fail-open step (no answer → nothing pinned) | Stop the run | It is an instrument, like `callers`: it never makes a run worse than today. |
-| Version 2.22.1 | 2.23.0 | A fix release, as 2.21.1 and 2.21.2 were, although it adds a command (as 2.21.2 added `validate` checks). |
-| AT in a named file `test_pinned_conflict.py`, with no exact version pin | A `test_acceptance_v2221.py` | `test_acceptance_v222.py` requires it to be the only `test_acceptance*` file; patch releases add named files (design 0031). |
-| Reuse `source_files`, `at_entity`, `owns`, `_without_root`, `pendingKey` | New scanners | Already tested. |
+| Root from the stdin `cwd` | The hook process's cwd; `git rev-parse` | The stdin `cwd` is documented as the worktree root; the process cwd is not. git costs a process per tool call (the hook's budget, design 0025). |
+| Any linked worktree of the same repository | Only `.claude/worktrees/` | User's choice: `sessions-check` recommends `git worktree add ../folder`. |
+| Also fix `core.ROOT` when `CLAUDE_PROJECT_DIR` names the main checkout | Only the hook | User's choice: whether Bash commands get the variable is not documented; if they did, a worktree's `agentic.py` would act on the main checkout (`root_drift` does not catch a worktree inside it). |
+| One implementation in `hook.py`, imported by `core` | A new module; two copies | A new module that `hook.py` imports would have to be never owned and installed too; `hook.py` already is both. |
+| Only a worktree with the flow installed, of the same repository | Any `.git` file | A worktree without `agentic.py` has no guard to run; another repository's guard must not judge this session's calls. |
+| Only the main thread follows the `cwd`; an agent uses the root its session's main thread chose (remembered in the project's state), a fallback agent the one its launcher set | Every call follows its own `cwd`; only `AGENTIC_WP` pinned | User's choice: an agent that ran `cd` into another worktree would otherwise be judged by that worktree's plan and guard, where today its writes are refused as outside the root. |
+| Three waves (WP-01 → WP-02 → WP-03) | WP-01 and WP-02 in one wave | `core.py` imports from `hook.py` at module level; the release measures both. |
+| Fall back to today's root on any doubt | Fail closed | Falling back is today's behaviour, never less safe; the guard still fails closed on its own errors. |
+| Version 2.22.2 | 2.23.0 | A fix. |
 
 ## 11. Risks and open questions
 
-- **False positives**: only a test that reads the finding's file as text can pin it, so behavioural tests never do. What remains is a static test that pins a part of the line the fix would not change (a pinned signature, a function-length finding): that finding goes to a person instead of a fix. Not measured.
-- **False negatives** (regex literals, concatenations, variables, multi-line pins): the run behaves as today. Not measured.
-- **The first wasted cycle of the field run** (the wave writes the form the rules ask for, the pin fails verification) is only addressed by the prompts of WP-03; prompt changes are not measured here (no bench scenario).
-- **Criteria that pin code text come from the plan.** If `/architect` writes "the source contains `ShowBalloonTip(10000`", the test-author now has a contradiction to report as `BLOCKER`. A sentence in `/architect` and the plan-reviewer is a follow-up, not in this release.
-- **The workflow's line allowance**: WP-02 may need a hand raise of `agentic-implement.js`'s stored lines (the ratchet's baseline is owned by no package). It is the same step 2.22.0 took.
-- **The field result's version** is inferred from its shape (issue 145), not stated.
-
-## Annex A · Conformance scenarios
-
-WP-02 adds these four scenarios to `.claude/bin/conformance.json` (`scenarios`, at the end), exactly. The AT refers to them by name. Every other key takes the defaults of `conformance.json`'s `plan` and of the simulated worlds; the default re-review answer is ADDRESSED.
-
-```json
-[
-  {
-    "name": "a reflex finding pinned by an acceptance test goes to pending",
-    "plan": {"root": "/repo"},
-    "standards": [
-      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
-        {"wp": "WP-02", "file": "/repo/src/b/x.py", "line": 3, "problem": "PINNED-PROBLEM", "evidence": "x = limit(10000)",
-         "fix": "a named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]}
-    ],
-    "gate_fail": [
-      {"prefix": "pinned", "exit_code": 0, "output": {"pinned": [
-        {"file": "src/b/x.py", "line": 3, "test": "acceptance/test_x.py", "test_line": 12, "text": "limit(10000"}], "skipped": []}}
-    ]
-  },
-  {
-    "name": "a pinned step that cannot answer leaves the finding to be fixed",
-    "standards": [
-      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
-        {"wp": "WP-02", "file": "src/b/x.py", "line": 3, "problem": "PINNED-PROBLEM", "evidence": "x = limit(10000)",
-         "fix": "a named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]},
-      {"status": "PASS", "axis": "standards", "findings": [], "not_checked": []}
-    ],
-    "gate_fail": [{"prefix": "pinned", "exit_code": 1, "output": "boom"}]
-  },
-  {
-    "name": "only reflex findings with a line are checked for pins",
-    "standards": [
-      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
-        {"wp": "WP-02", "file": "src/b/x.py", "line": 3, "problem": "FINISH-NOTE", "evidence": "e", "fix": "f",
-         "if_skipped": "s", "provenance": "read", "tier": "finish", "rule": "No magic numbers"},
-        {"wp": "WP-02", "file": "src/b/y.py", "problem": "NO-LINE", "evidence": "e", "fix": "f", "if_skipped": "s",
-         "provenance": "read", "tier": "reflex", "rule": "No magic numbers"},
-        {"wp": "WP-02", "file": "src/b/a b.py", "line": 3, "problem": "SPACED-PATH", "evidence": "e", "fix": "f",
-         "if_skipped": "s", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]},
-      {"status": "PASS", "axis": "standards", "findings": [], "not_checked": []}
-    ]
-  },
-  {
-    "name": "a pinned finding is not re-reviewed and stays pending",
-    "standards": [
-      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
-        {"wp": "WP-02", "file": "src/b/x.py", "line": 3, "problem": "PINNED-PROBLEM", "evidence": "x = limit(10000)",
-         "fix": "a named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"},
-        {"wp": "WP-02", "file": "src/b/x.py", "line": 9, "problem": "FIXED-PROBLEM", "evidence": "y = 255",
-         "fix": "a named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]}
-    ],
-    "gate_fail": [
-      {"prefix": "pinned", "exit_code": 0, "output": {"pinned": [
-        {"file": "src/b/x.py", "line": 3, "test": "acceptance/test_x.py", "test_line": 12, "text": "limit(10000"}], "skipped": []}}
-    ]
-  }
-]
-```
-
-What each one must produce, in both engines:
-
-| Scenario | `pinned` gates | `fix_cycles` | `result` | `pending` types |
-|---|---|---|---|---|
-| a reflex finding pinned by an acceptance test goes to pending | `pinned src/b/x.py:3` | 0 | REVIEW | `acceptance conflict` |
-| a pinned step that cannot answer leaves the finding to be fixed | `pinned src/b/x.py:3` | 1 | OK | none |
-| only reflex findings with a line are checked for pins | none | 1 | OK | none |
-| a pinned finding is not re-reviewed and stays pending | `pinned src/b/x.py:3 src/b/x.py:9` | 1 | REVIEW | `acceptance conflict` |
-
-In the third, the finish note never blocks, and the two reflex findings (no line; a path with a space) are fixed and re-reviewed as today.
+- **An old `hook.py` in the main checkout** keeps today's behaviour: the session starts there, so the hook comes from there. The diagnosis hint names the remedy (C5).
+- **Bash and `CLAUDE_PROJECT_DIR`**: not documented. C4 covers the variable being set; without it, `ROOT` is already the worktree.
+- **Desktop worktree sessions**: the docs say hook commands run in the main checkout root there; the stdin `cwd` is still documented as the worktree. Not measured on desktop.
+- **A real `claude --worktree` run** is not in the tests; the AT reproduces the documented values.
+- **Subagents' `session_id`** is inferred to be the parent session's (design 0024 calls it not verified). If it were another id, a native agent would fall back to the main checkout's root: today's behaviour, so its writes in the worktree are refused (a visible stop, not a hole).
+- **The `verify` phases** run the bench, the workflow and `.claude/bin`'s suite; the root `acceptance/` and `qa/` suites CI also runs are only in WP-03's validation.
+- **The main thread leaving the worktree** (`cd` back to the main checkout) removes its session's entry: agents launched after that are judged in the main checkout, as today.
+- **`waiting.py`** still writes its waiting record to the main checkout from a worktree (Excluded).

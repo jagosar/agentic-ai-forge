@@ -153,6 +153,14 @@ NOTES = {
         "A workflow-subagent (the type the Workflow tool's subagents may carry; not verified) cannot write files "
         "before it claims its zone. Bash stays open, so a gatekeeper with that type keeps working.",
     ],
+    "2.22.2": [
+        "Native /implement works in a git worktree. Claude Code keeps CLAUDE_PROJECT_DIR at the checkout the session "
+        "started in, so the hook ran that checkout's guard, wrote its heartbeat there and refused every write in a "
+        "worktree under .claude/worktrees/. hook.py now follows the session's main thread into a linked worktree of "
+        "the same repository (from the hook's cwd), judges it with that worktree's guard, and pins the session's "
+        "agents to it; agentic.py takes its own worktree as the root. Update the flow in the checkout you start "
+        "sessions from: its hook.py is the one that runs.",
+    ],
     "2.22.1": [
         "A Standards finding that an acceptance test pins no longer burns the fix cycles (issue 145). After each "
         "review, `agentic.py pinned` checks every confirmed reflex finding that has a line: when an acceptance test "
