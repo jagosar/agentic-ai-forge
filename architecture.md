@@ -72,7 +72,8 @@ docs/how-it-works.md                     WP-03  one paragraph on worktrees
 | Release notes go newest first, `2.22.1` at the top of the recent block | `.claude/bin/upgrade.py:156-165` | `2.22.2` right before `2.22.1` | read |
 | `test_acceptance_v222.py` pins the plugin version on line 229 | `.claude/bin/test_acceptance_v222.py:226-229` | `"2.22.1"` → `"2.22.2"` | read |
 | `test_pinned_conflict.py` (2.22.1) checks the version is ≥ 2.22.1 and that `"2.22.1"` is followed by `"2.22.0"` in `NOTES` | `.claude/bin/test_pinned_conflict.py:193-200` | Still true with `2.22.2` placed before `2.22.1` | read |
-| Claude Code keeps `CLAUDE_PROJECT_DIR` at the main checkout and gives the worktree root as the stdin `cwd`; whether Bash commands get `CLAUDE_PROJECT_DIR` is not documented | https://code.claude.com/docs/en/worktrees.md | The field diagnosis showed `project_dir = null` in a Bash call | inferred |
+| Claude Code keeps `CLAUDE_PROJECT_DIR` at the main checkout and gives the worktree root as the stdin `cwd`; whether Bash commands get `CLAUDE_PROJECT_DIR` is not documented | https://code.claude.com/docs/en/worktrees.md | The field diagnosis showed `project_dir = null` in a Bash call. The AT reproduces these documented values; no real `claude --worktree` payload was captured | inferred |
+| A subagent's hook payload carries its parent session's `session_id` (with its own `agent_id`) | not documented; design 0024 calls the gatekeeper's session id "not verified" | If it does not, a native agent falls back to the main checkout's root (today's behaviour: its writes in the worktree are refused, a visible stop) | inferred |
 
 What must NOT change: the hook's behaviour outside a linked worktree (same guard, same root, same exit codes); `settings.json`; the import budget of the hook (`test_hook_path.py`, `test_lean_hook.py`).
 
@@ -109,7 +110,7 @@ SESSION_ROOTS_MAX = 20  # sessions remembered; the oldest are dropped
 - `env.get("AGENTIC_WP")` set → `Path(project)` (a fallback agent: its launcher already set `CLAUDE_PROJECT_DIR` to the run's root, `.claude/bin/launch.py:236`).
 - `agent_id` present (a subagent of the session) → the root remembered for `session_id` when it is still `linked_worktree(root, project) == root`; otherwise `Path(project)`. The agent's own `cwd` is never read.
 - Otherwise (the main thread): `root = linked_worktree(cwd, project)` when `cwd` is given, else `None`; then `remember(project, session_id, root)` when `session_id` is given; returns `root` or `Path(project)`.
-- `remember(project, session_id, root)`: writes `SESSION_ROOTS` under `project` with that session's entry set to `{"root": str(root), "ts": time.time()}` when `root` is not `None`, or removed when it is; it keeps the newest `SESSION_ROOTS_MAX`; writes a temporary file beside it and `os.replace`s it; writes nothing when the entry would not change; any `OSError` or `ValueError` is ignored (an agent then falls back to `project`, today's behaviour).
+- `remember(project, session_id, root)`: writes `SESSION_ROOTS` under `project` with that session's entry set to `{"root": str(root), "ts": time.time()}` when `root` is not `None`, or removed when it is; it keeps the newest `SESSION_ROOTS_MAX`; creates `<project>/.claude/state/` when missing (`mkdir(parents=True, exist_ok=True)`: a main checkout used only through worktrees never had one); writes a temporary file beside it named with the process id (`worktree-roots.json.<pid>.tmp`) and `os.replace`s it; an entry whose `root` is unchanged is not rewritten (its `ts` stays: the file is written only when a session's root changes); any `OSError` or `ValueError` is ignored (an agent then falls back to `project`, today's behaviour).
 - `remembered(project, session_id) -> Path | None`: the entry's `root`, or `None` when the file, the entry or its shape is missing.
 
 ### C3 · `hook.main()` (the launcher)
@@ -126,7 +127,7 @@ SESSION_ROOTS_MAX = 20  # sessions remembered; the oldest are dropped
 - `env = os.environ.get("CLAUDE_PROJECT_DIR")`.
 - When `env` is set and `hook.linked_worktree(SOURCE_ROOT, env)` equals `SOURCE_ROOT.resolve()`: `SOURCE_ROOT`.
 - Otherwise: `Path(env or SOURCE_ROOT)` (today's value).
-- `core` imports `linked_worktree` from the sibling `hook` module (`from hook import linked_worktree`). `hook.py` has no side effect at import.
+- `core` imports `linked_worktree` from the sibling `hook` module inside `try: from hook import linked_worktree` / `except ImportError: linked_worktree = None`; when it is `None`, `project_root()` returns today's value. An older `hook.py` beside a newer `core.py` (an `install` that kept a user-edited `hook.py`, `.claude/bin/installer.py:209-214`, or a half-done upgrade) must never stop `agentic.py hook` before `guardrail.hook()`'s `try`: that would exit 1, which Claude Code does not treat as a block (`.claude/bin/agentic.py:82-89`). `hook.py` has no side effect at import.
 
 ### C5 · The diagnosis hint (guardrail.py `_hints`)
 
@@ -157,6 +158,7 @@ The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the
   - Action: (a) the fallback: `hook.py` with `AGENTIC_WP=WP-01`, `CLAUDE_PROJECT_DIR=<worktree>` (what the launcher sets) and a `Write` payload for `<worktree>/src/a.py`, then for `<worktree>/src/c.py`, each with `"cwd": "<worktree>"` and `content` `"x = 1\n"`. (b) the native engine: with `CLAUDE_PROJECT_DIR=<repo>`, first a main-thread call (AC-001's payload, `session_id` `s1`), then an agent call `{"tool_name": "Bash", "tool_input": {"command": "python3 .claude/bin/agentic.py claim WP-01"}, "session_id": "s1", "agent_id": "a1", "agent_type": "implementer", "cwd": "<worktree>"}`, then the two `Write` payloads with the same `session_id`, `agent_id` and `agent_type`.
   - Expected: in (a) and (b), the write to `src/a.py` exits 0 and the write to `src/c.py` exits 2 with `does not own src/c.py` in stderr; in (b) `<worktree>/.claude/state/claims.json` names `a1`.
   - Must not: either stderr containing `.claude/worktrees`.
+  - Note: (a) runs the worktree's `hook.py` (the launcher points `CLAUDE_PROJECT_DIR` at the worktree) and already passes today: it guards against a regression; (b) runs `<repo>`'s `hook.py` and is red today.
   - Check: `test_worktree_hook.py`, AC-002 tests.
   - WP: WP-01
 - AC-003 · A worktree outside the main checkout works the same way
@@ -180,6 +182,13 @@ The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the
   - Must not: the `x` worktree's guard judging an agent of `s1`; an agent call writing `worktree-roots.json`.
   - Check: `test_worktree_hook.py`, AC-008 tests.
   - WP: WP-01
+- AC-009 · An older `hook.py` beside the new `core.py` keeps today's root and the guard still blocks
+  - Scenario: the repo of AC-001 whose `.claude/bin/hook.py` is replaced by the version of commit `0c5928b` (`git show 0c5928b:.claude/bin/hook.py` in this repository; it has no `linked_worktree`), uncommitted.
+  - Action: `python3 -c "import sys; sys.path.insert(0, '<repo>/.claude/bin'); import core; print(core.ROOT)"` with `CLAUDE_PROJECT_DIR=<repo>`; then `python3 <repo>/.claude/bin/agentic.py hook` with `AGENTIC_WP=WP-01`, `CLAUDE_PROJECT_DIR=<repo>` and a `Write` payload for `<repo>/src/c.py`.
+  - Expected: the first prints `<repo>` and exits 0; the second exits 2 with `does not own src/c.py`.
+  - Must not: an `ImportError` traceback; an exit of 1 from the hook.
+  - Check: `test_worktree_hook.py`, AC-009 test.
+  - WP: WP-02
 - AC-005 · `core.ROOT` is the worktree when `CLAUDE_PROJECT_DIR` names the main checkout but the script lives in the worktree
   - Scenario: the repo and worktree of AC-001.
   - Action: `python3 -c "import sys; sys.path.insert(0, '<dir>/.claude/bin'); import core; print(core.ROOT)"` run (a) with `<dir>` = the worktree, `CLAUDE_PROJECT_DIR=<repo>`; (b) with `<dir>` = `<repo>`, `CLAUDE_PROJECT_DIR=<repo>`; (c) with `<dir>` = the worktree and no `CLAUDE_PROJECT_DIR`; (d) with `<dir>` = a copy of `.claude/bin` outside any repo, `CLAUDE_PROJECT_DIR=<repo>`.
@@ -218,6 +227,7 @@ The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the
   - Keep `hook.py` free of flow imports; `json`, `io`, `runpy` and `time` are standard.
   - Only main-thread calls write `worktree-roots.json`; an agent's call only reads it.
   - Commit `hook.py` first: WP-02's `core.py` imports `linked_worktree` from it, so the order is a dependency, not a style.
+  - Known red until the later waves: AC-005, AC-006, AC-009 (WP-02), AC-007 and `test_lean`/`test_lean_hook`'s budget checks (WP-03).
 - **Exact imports and APIs:** `import io, json, os, runpy, sys, time`; `from pathlib import Path`.
 - **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_worktree_root.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
@@ -225,13 +235,13 @@ The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the
 - Wave 2 (`core.py` imports `linked_worktree` from WP-01's `hook.py` at module level: without it every flow module fails to import).
 - Files: `.claude/bin/core.py`, `.claude/bin/guardrail.py`, `.claude/bin/test_core_root.py`.
 - Implements C4, C5. Consumes C1 by implementation (`depends_on`: WP-01).
-- ACs: AC-005, AC-006.
+- ACs: AC-005, AC-006, AC-009.
 - **Patterns to mirror:** `.claude/bin/core.py:18-24` (the root constants); `.claude/bin/core.py:174-186` (`root_drift`, unchanged); `.claude/bin/guardrail.py:545-560` (the hints).
 - **Gotchas:**
   - `core` is imported by every flow module and by the hook: the import of `hook` must stay cheap (no git, a few `stat` calls).
   - `from hook import linked_worktree` works because `core.py` already puts its folder on `sys.path` (`.claude/bin/core.py:15`).
   - Known red until WP-03: `test_lean` (the budget) and AC-007.
-- **Exact imports and APIs:** `from hook import linked_worktree  # noqa: E402` after the `compat` import.
+- **Exact imports and APIs:** after the `compat` import, `try: from hook import linked_worktree  # noqa: E402` and `except ImportError: linked_worktree = None` (with a comment saying why).
 - **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_core_root.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
 #### WP-03 · Documentation and release 2.22.2
@@ -255,7 +265,7 @@ The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the
     {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/test_worktree_root.py"],
      "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-008"], "mirror": [".claude/bin/hook.py:1-29", ".claude/bin/test_hook_diagnosis.py:120-145", ".claude/bin/test_hook_path.py:27-40"]},
     {"id": "WP-02", "wave": 2, "depends_on": ["WP-01"], "files": [".claude/bin/core.py", ".claude/bin/guardrail.py", ".claude/bin/test_core_root.py"],
-     "acs": ["AC-005", "AC-006"], "mirror": [".claude/bin/core.py:18-24", ".claude/bin/core.py:174-186", ".claude/bin/guardrail.py:545-560"]},
+     "acs": ["AC-005", "AC-006", "AC-009"], "mirror": [".claude/bin/core.py:18-24", ".claude/bin/core.py:174-186", ".claude/bin/guardrail.py:545-560"]},
     {"id": "WP-03", "wave": 3, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
      "acs": ["AC-007"], "mirror": [".claude/bin/upgrade.py:156-165"]}
   ]
@@ -265,7 +275,7 @@ The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the
 ## 9. Test strategy
 
 - **Unit:** WP-01 in `test_worktree_root.py` (`linked_worktree` over real `git worktree add` folders and hand-written `.git` files; `choose_root` over byte payloads); WP-02 in `test_core_root.py` (`project_root` in subprocesses, since `ROOT` is fixed at import).
-- **Acceptance (AT, wave 0):** `.claude/bin/test_worktree_hook.py`, red today: AC-001's heartbeat lands in the main checkout, AC-002's writes are refused as `.claude/` paths, `choose_root` does not exist. Repos are built in temporary folders with `git init`, a copy of `.claude/bin` without `test_*.py` and `__pycache__`, `.claude/settings.json`, `.claude/agents`, and `architecture.md` holding `test_agentic.MANIFEST`, committed with `GIT` from `test_hook_diagnosis.py`. `hook.py` is run with `sys.executable`. AC-007 is skipped outside the flow repo. The AT must not write `"2.21.2"`, `"2.22.0"` or `"2.22.1"` on a line containing `version`: the earlier acceptance files forbid it.
+- **Acceptance (AT, wave 0):** `.claude/bin/test_worktree_hook.py`, red today: AC-001's heartbeat lands in the main checkout, AC-002 (b)'s writes are refused as `.claude/` paths, `choose_root` does not exist. Repos are built in temporary folders with `git init`, a copy of `.claude/bin` without `test_*.py` and `__pycache__`, `.claude/settings.json`, `.claude/agents`, and `architecture.md` holding `test_agentic.MANIFEST`, committed with `GIT` from `test_hook_diagnosis.py`. `hook.py` is run with `sys.executable`. AC-007 is skipped outside the flow repo. The AT must not write `"2.21.2"`, `"2.22.0"` or `"2.22.1"` on a line containing `version`: the earlier acceptance files forbid it.
 - **QA:** a real `claude --worktree` session is out of reach in CI; QA checks a Windows-style `.git` file (`gitdir: C:/…`) and a relative `gitdir`.
 - Executed by hand (`"maintainer": true`).
 
@@ -291,4 +301,5 @@ The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the
 - **A real `claude --worktree` run** is not in the tests; the AT reproduces the documented values.
 - **Subagents' `session_id`** is inferred to be the parent session's (design 0024 calls it not verified). If it were another id, a native agent would fall back to the main checkout's root: today's behaviour, so its writes in the worktree are refused (a visible stop, not a hole).
 - **The `verify` phases** run the bench, the workflow and `.claude/bin`'s suite; the root `acceptance/` and `qa/` suites CI also runs are only in WP-03's validation.
+- **The main thread leaving the worktree** (`cd` back to the main checkout) removes its session's entry: agents launched after that are judged in the main checkout, as today.
 - **`waiting.py`** still writes its waiting record to the main checkout from a worktree (Excluded).
