@@ -25,7 +25,38 @@ FLOW_REPO_ONLY = unittest.skipUnless(core.is_flow_repo(ROOT), "the flow's own re
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
 SEEN = Path(".claude/state/hook-seen.json")
 ROOTS = Path(".claude/state/worktree-roots.json")
-OLD_HOOK_COMMIT = "0c5928b"  # the last release before 0034: its hook.py has no linked_worktree
+# hook.py as 2.22.1 shipped it (commit 0c5928b), inlined: an installed project has no git history to read it from.
+OLD_HOOK = """\"\"\"The flow's PreToolUse hook launcher: runs `agentic.py hook` from the repository's .claude/bin.
+
+settings.json names this file, so it stays where projects expect it. It is never owned by a work package: an agent that
+could edit it could replace the guard that judges it. Standard library only, no type annotations (Python 3.9), and
+it never imports agentic.py at module level, so a broken agentic.py cannot break the launcher itself.
+\"\"\"
+import os
+import runpy
+import sys
+from pathlib import Path
+
+
+def target():
+    root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path(__file__).resolve().parents[2])
+    return root / ".claude" / "bin" / "agentic.py"
+
+
+def main():
+    try:
+        script = target()
+    except Exception as e:  # noqa: BLE001 - no guard can be chosen: fail closed
+        print(f"[agentic hook.py] cannot choose the guard, blocked for safety: \
+{type(e).__name__}: {e}", file=sys.stderr)
+        sys.exit(2)
+    sys.argv = [str(script), "hook"]
+    runpy.run_path(str(script), run_name="__main__")
+
+
+if __name__ == "__main__":
+    main()
+"""
 
 
 def temp_dir(test, prefix):
@@ -207,10 +238,8 @@ class CoreRootTests(WorktreeCase):
         self.assertEqual(self.core_root(plain / ".claude/bin", CLAUDE_PROJECT_DIR=self.repo), self.repo)
 
     def test_ac_009_an_older_hook_beside_the_new_core_keeps_today_s_root_and_the_guard_blocks(self):
-        old = subprocess.run(["git", "show", f"{OLD_HOOK_COMMIT}:.claude/bin/hook.py"], cwd=ROOT,
-                             capture_output=True, text=True, check=True).stdout
-        self.assertNotIn("linked_worktree", old)
-        (self.repo / ".claude/bin/hook.py").write_text(old, encoding="utf-8")
+        self.assertNotIn("linked_worktree", OLD_HOOK)
+        (self.repo / ".claude/bin/hook.py").write_text(OLD_HOOK, encoding="utf-8")
         self.assertEqual(self.core_root(self.repo / ".claude/bin", CLAUDE_PROJECT_DIR=self.repo), self.repo)
         r = subprocess.run([sys.executable, str(self.repo / ".claude/bin/agentic.py"), "hook"], cwd=self.repo,
                            input=json.dumps(write_call(self.repo / "src/c.py", self.repo)), capture_output=True,
