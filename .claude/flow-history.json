@@ -887,7 +887,8 @@
    "c0a10a6fdf0e226f6cd2393b44b6cb56e23d67b1828276bbd7cabc1bd4a48ee4"
   ],
   ".claude/bin/test_worktree_hook.py": [
-   "64fcd0d66d14d14b4fab0d8652f67a85cef9dc2ee4810bdacca40fe94d04c9d9"
+   "64fcd0d66d14d14b4fab0d8652f67a85cef9dc2ee4810bdacca40fe94d04c9d9",
+   "974d2e657b9792814a8c85ff663ddf9d23195a99a66a0ea65e66b64674c72e9d"
   ],
   ".claude/bin/test_worktree_root.py": [
    "10f88272ec2ab49eeb1563d5e6cd67f714abc4f8395b257a10a8032ec52a0afa"
@@ -1167,5 +1168,5 @@
    "3f89e6998f224d177ff301cf1c430250a1cf8cb73db672cecf8c882c9b57e5f7"
   ]
  },
- "generated_from": "368fc616fdb97244fe648d2303cec0d9aafa4ce0"
+ "generated_from": "d0392e4b0b0e8f5e766a7af64c5f6d05aaed282a"
 }
