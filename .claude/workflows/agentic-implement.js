@@ -228,6 +228,35 @@ const qaNotRunItems = qa => {
   return cmds.length ? cmds.map(c => notRunItem(c, `run ${c}`))
     : [notRunItem('QA\'s validation', 'allow QA\'s test commands, then run /implement again')]
 }
+// findings.py's pin helpers: a Standards reflex finding with a line may be pinned by an acceptance test.
+const PIN_PATH = /^[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)*$/
+const PIN_MAX_ARGS = 40
+const ACCEPTANCE_CONFLICT_DECISION = "the fix would break the acceptance test that pins this line's text: change " +
+  "the test to check behaviour, or waive this rule for this file in the plan's waivers"
+const pinPath = f => {
+  const line = f ? f.line : null
+  const real = f && f.tier === 'reflex' && Number.isInteger(line) && line >= 1 && typeof f.file === 'string' && f.file
+  const path = real ? noRoot(f.file, str(plan.root)) : ''
+  return PIN_PATH.test(path) && !path.split('/').some(p => p === '.' || p === '..') ? path : null
+}
+const pinnedArgs = findings =>
+  [...new Set(findings.filter(pinPath).map(f => `${pinPath(f)}:${f.line}`))].slice(0, PIN_MAX_ARGS)
+const usablePin = p => p && typeof p === 'object' && Number.isInteger(p.line) && Number.isInteger(p.test_line) &&
+  ['file', 'test', 'text'].every(k => typeof p[k] === 'string')
+const splitPinned = (findings, answer) => {
+  const pins = answer && Array.isArray(answer.pinned) ? answer.pinned.filter(usablePin) : []
+  const wanted = new Set(pinnedArgs(findings))
+  const out = { kept: [], pinned: [] }
+  for (const f of findings) {
+    const path = pinPath(f)
+    const pin = path && wanted.has(`${path}:${f.line}`) ? pins.find(p => p.file === path && p.line === f.line) : null
+    if (pin) out.pinned.push({ ...f, pinned_by: { test: pin.test, test_line: pin.test_line, text: pin.text } })
+    else out.kept.push(f)
+  }
+  return out
+}
+const conflictItem = f =>
+  ({ type: 'acceptance conflict', source: 'standards-reviewer', ...f, decision: ACCEPTANCE_CONFLICT_DECISION })
 // Each agent reads the slice of architecture.md that `agentic.py briefs` wrote for it, not the whole document.
 const brief = id => `.claude/state/briefs/${id}.md`
 // The writers' prompts carry no rules (they end their brief); this sentence asks for an acceptance repair.
@@ -307,9 +336,10 @@ const stop = (stage, detail, extra) => ({ ...run, result: 'REVIEW', failed_stage
 const fixCount = {}
 const fixHistory = {}
 const limitPending = []
+const conflictPending = []  // Standards findings an acceptance test pins: listed, never fixed in this run
 let qaPending = []  // the last QA's design and no-WP items: they stay listed whatever comes after
 const newPending = []  // what a re-review found that was not open: listed, never fixed in this run
-const pendingNow = () => [...qaPending, ...limitPending, ...concernPending, ...newPending]
+const pendingNow = () => [...qaPending, ...limitPending, ...conflictPending, ...concernPending, ...newPending]
 // The review after the first full one is scoped: the confirmed findings of the packages fixed since then.
 const AXES = ['spec', 'standards']
 let reviewed = false
@@ -706,8 +736,25 @@ const reReviewStage = async post => {
   }
   return closeReview({ spec: record.spec.confirmed, standards: record.standards.confirmed })
 }
+// The Standards findings an acceptance test pins leave the fix queue and become pending items. One lone gate call, and
+// only when some finding may be pinned; a step that fails or answers no JSON pins nothing.
+const checkPins = async byAxis => {
+  const args = pinnedArgs(byAxis.standards)
+  let split = { kept: byAxis.standards, pinned: [] }
+  if (args.length) {
+    const st = step(await seq([`pinned ${args.join(' ')}`], 'pinned'), 0)
+    split = splitPinned(byAxis.standards, ok(st) ? lastJson(st.output) : null)
+    for (const item of split.pinned.map(conflictItem)) {
+      if (!conflictPending.some(p => pendingKey(p) === pendingKey(item))) conflictPending.push(item)
+    }
+  }
+  Object.assign(run.review.standards, { confirmed: split.kept, pinned: split.pinned })
+  run.review.confirmed = [...byAxis.spec, ...split.kept]
+  return { spec: byAxis.spec, standards: split.kept }
+}
 // The next review starts from these findings, no package fixed since; a change at close means someone wrote.
-const closeReview = async byAxis => {
+const closeReview = async checked => {
+  const byAxis = await checkPins(checked)
   const confirmed = [...byAxis.spec, ...byAxis.standards]
   reviewed = true
   lastConfirmed = byAxis

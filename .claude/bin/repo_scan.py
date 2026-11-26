@@ -11,8 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from core import (  # noqa: E402
-    ARCHIVE_DIR, DEFAULT_CODEMAP, ManifestError, ROOT, RULES_DIR, RULES_LIBRARY, SKIP_DIRS, codemap_path, die,
-    docs_entity, ledger_stage, load_manifest, owns, source_files, symbol_re
+    ARCHIVE_DIR, DEFAULT_CODEMAP, ManifestError, ROOT, RULES_DIR, RULES_LIBRARY, SKIP_DIRS, at_entity, codemap_path,
+    die, docs_entity, ledger_stage, load_manifest, owns, source_files, symbol_re
 )
 
 # Signals for each rules pack: project files (in any folder) and code extensions.
@@ -185,6 +185,23 @@ CALLER_RE_TEMPLATE = r"(?<![\w$])%s(?![\w$])"  # the symbol as a whole word; $ f
 
 EMPTY_CALLERS = {"changed": [], "symbols": {}, "callers": [], "truncated": False}
 
+# ---------- pins: acceptance tests that fix the text of a line ----------
+
+PIN_PATH = r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*"  # the same pattern as findings.PIN_PATH (a test holds them equal)
+PIN_MIN_CHARS = 8  # a shorter fragment pins nothing
+PIN_CODE_CHARS = "()[]{}=;"  # a fragment must hold one: it is code text, not a word or a message
+PIN_WINDOW = 1  # lines around the finding's line that are searched
+PIN_MAX_BYTES = 262144  # a larger file is not read
+PIN_TEXT_MAX = 160  # characters of the fragment reported
+# A test file that reads a file as text: only such a file can pin the source's text (a behavioural test cannot).
+PIN_READ_RE = re.compile(r"Get-Content|ReadAll(?:Text|Lines)|read_text|readFileSync|readFile|ReadFile|readString"
+                         r"|readAllLines|file_get_contents|File\.read|\bopen\(")
+PIN_LITERAL_RE = re.compile(r"'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"")
+PIN_WILDCARD_RE = re.compile(r"\.\*\??|\.\+\??|\\[sSdDwW][*+?]?|[*^$]")
+PIN_UNESCAPE_RE = re.compile(r"\\(.)")
+PIN_LINE_RE = re.compile(r"[1-9][0-9]*")
+EMPTY_PINNED = {"pinned": [], "skipped": []}
+
 def _git_paths(args):
     """The NUL-separated paths a git command prints, or None when git or the revision is not there."""
     try:
@@ -279,6 +296,94 @@ def callers():
     except Exception as e:  # noqa: BLE001 - the step must not stop the review
         print(f"[agentic] callers skipped: {type(e).__name__}: {e}", file=sys.stderr)
         print(json.dumps(dict(EMPTY_CALLERS, error=f"{type(e).__name__}: {e}"), ensure_ascii=False))
+    sys.exit(0)
+
+
+def pin_fragments(line):
+    """The pieces of the string literals of a line of a test that look like code text: 8 or more characters, one of
+    PIN_CODE_CHARS, wildcards and escapes of a regular expression read as plain text."""
+    out = []
+    for m in PIN_LITERAL_RE.finditer(line):
+        body = m.group(1) if m.group(1) is not None else m.group(2)
+        for piece in PIN_WILDCARD_RE.split(body):
+            piece = PIN_UNESCAPE_RE.sub(r"\1", piece).strip()
+            if len(piece) >= PIN_MIN_CHARS and any(c in piece for c in PIN_CODE_CHARS):
+                out.append(piece)
+    return out
+
+
+def find_pin(path, line, source, tests):
+    """The first literal of `tests` ([(test_path, [lines])]) found in the lines around `line` of `source` (a list of
+    lines of `path`), as {"file", "line", "test", "test_line", "text"}; None when nothing matches."""
+    window = source[max(0, line - 1 - PIN_WINDOW):line + PIN_WINDOW]
+    for test_path, lines in tests:
+        for number, text in enumerate(lines, 1):
+            for fragment in pin_fragments(text):
+                if any(fragment in seen for seen in window):
+                    return {"file": path, "line": line, "test": test_path, "test_line": number,
+                            "text": fragment[:PIN_TEXT_MAX]}
+    return None
+
+
+def pin_lines(rel):
+    """The lines of a file (UTF-8, \\r stripped), or None when it is missing or over PIN_MAX_BYTES."""
+    try:
+        path = ROOT / rel
+        if path.stat().st_size > PIN_MAX_BYTES:
+            return None
+        return path.read_text(encoding="utf-8", errors="replace").replace("\r", "").split("\n")
+    except OSError:
+        return None
+
+
+def pin_argument(arg):
+    """(path, line) of a FILE:LINE argument that is safe and names a file, else None."""
+    path, _, number = arg.rpartition(":")
+    if not re.fullmatch(PIN_PATH, path) or set(path.split("/")) & {".", ".."} or not PIN_LINE_RE.fullmatch(number):
+        return None
+    return (path, int(number)) if (ROOT / path).is_file() else None
+
+
+def pin_tests(manifest):
+    """[(path, lines)] of the acceptance zone's files that read a file as text, in path order."""
+    zone = at_entity(manifest)["files"]
+    out = []
+    for rel in source_files():
+        lines = pin_lines(rel) if any(owns(f, rel) for f in zone) else None
+        if lines is not None and PIN_READ_RE.search("\n".join(lines)):
+            out.append((rel, lines))
+    return out
+
+
+def pins_for(args, manifest):
+    """The pins of the FILE:LINE arguments, and the arguments skipped, each once and in order."""
+    tests, pins, skipped, seen = pin_tests(manifest), [], [], set()
+    for arg in args:
+        if arg in seen:
+            continue
+        seen.add(arg)
+        found = pin_argument(arg)
+        source = pin_lines(found[0]) if found else None
+        if source is None:
+            skipped.append(arg)
+            continue
+        name = found[0].rsplit("/", 1)[-1].lower()
+        mine = [(p, ls) for p, ls in tests if p != found[0] and name in "\n".join(ls).lower()]
+        pin = find_pin(found[0], found[1], source, mine)
+        if pin:
+            pins.append(pin)
+    return pins, skipped
+
+
+def pinned(args):
+    """One JSON line for the engines: which FILE:LINE arguments hold text that an acceptance test fixes. Exits 0
+    whatever happens: an instrument never stops the review."""
+    try:
+        pins, skipped = pins_for(args, load_manifest()) if args else ([], [])
+        print(json.dumps({"pinned": pins, "skipped": skipped}, ensure_ascii=False))
+    except Exception as e:  # noqa: BLE001 - the step must not stop the review
+        print(f"[agentic] pinned skipped: {type(e).__name__}: {e}", file=sys.stderr)
+        print(json.dumps(dict(EMPTY_PINNED, error=f"{type(e).__name__}: {e}"), ensure_ascii=False))
     sys.exit(0)
 
 

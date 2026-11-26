@@ -24,13 +24,14 @@ The test-author wrote the acceptance tests and they are red. Red only proves tha
    - Is there a test that passes whatever the implementation does (no assertion, `assert True`, a skipped or xfail test, an assertion inside a branch that may not run)?
    - **Tautological:** the expected value is recomputed the way the code would compute it (`expect(add(a, b)).toBe(a + b)`, a constant compared with itself): it passes by construction. Expected values come from an independent source: a literal, a worked example, the criterion.
    - **Wrong:** an expected value that contradicts the criterion's Expected (or the plan's own arithmetic, a worked example, a contract) makes a correct implementation fail: the implementers then stop or bend the code to the test. Check every literal and every computed expectation against the criterion's value, by hand (`960 + 480` where the criterion says 960 is wrong).
+   - **Pins the code's form:** a test that reads a production file as text and asserts a fragment of it. High when the fragment holds a form that section 7 or the rules forbid (the fix the Standards reviewer would ask for breaks the test); medium when the behaviour could be observed through section 6 instead.
    - Do the tests depend on each other or on the order they run in?
    - **Untested helpers and doubles:** a helper or test double (a fake, a stub, a builder) that no test exercises on its own, run against a trivial input, is high when a criterion's test relies on it: a fake that always answers the same thing lets a stub pass.
 4. Do not judge style, and do not ask for more tests than the criteria need.
 
 # Severity
 
-- **critical / high:** a criterion that an empty or trivial implementation would satisfy, a test that cannot fail, or a wrong expected value (a test that a correct implementation fails). These make the test-author revise.
+- **critical / high:** a criterion that an empty or trivial implementation would satisfy, a test that cannot fail, a wrong expected value (a test that a correct implementation fails), or a test that pins a form section 7 or the rules forbid. These make the test-author revise.
 - **medium / low:** weaker assertions that still catch a wrong implementation. They are reported, not blocking.
 
 Every finding also carries a `tier`: `floor` for critical and high (it blocks the tests until they are revised), `finish` for medium and low (it never blocks).

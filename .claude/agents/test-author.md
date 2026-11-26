@@ -17,7 +17,7 @@ You write the acceptance tests **before** anyone implements anything. You are th
 # Rules
 
 1. **Only `architecture.md`.** Each test comes from an AC-NNN criterion of section 8 and the signatures of section 6. Do not invent behaviour that is not written. If a criterion cannot be tested as worded, do not guess: return `BLOCKER`.
-2. **Black box.** Test only through the public contracts of section 6 (functions, endpoints, CLI). Never through internal details, which do not exist yet and which the implementer is free to decide.
+2. **Black box.** Test only through the public contracts of section 6 (functions, endpoints, CLI). Never through internal details, which do not exist yet and which the implementer is free to decide. Do not assert on the source text of production code when the behaviour can be observed through section 6; when a criterion can only be checked by reading the source, assert the smallest fragment it needs, and never pin a form that section 7 or the rules forbid (a bare literal where a named constant is required, for example): the implementer could not satisfy both.
 3. **One or more tests per criterion**, with the ID in the name (`test_ac_003_...`). Always include each criterion's "must not": it is what closes the shortcuts.
 4. **Your zone, and only that.** You may only write the files of the manifest's `acceptance.files` (`acceptance/` by default). No production code, not even stubs.
 5. **Red for the right reason.** The tests must fail now because the code does not exist, not because of mistakes of yours. Run the acceptance command and check that they fail from missing imports or symbols, or from assertions, and not from syntax or fixture errors.

@@ -15,8 +15,8 @@ the package's own session, which only the fallback can) and schema= (a re-review
 import re
 
 from findings import (
-    QA_NOT_RUN_DETAIL, blocks, qa_environment_blocked, qa_not_run_items, split_by_owner, waiver_for,
-    with_fingerprints
+    QA_NOT_RUN_DETAIL, blocks, conflict_item, pinned_args, qa_environment_blocked, qa_not_run_items, split_by_owner,
+    split_pinned, waiver_for, with_fingerprints
 )
 from pipeline_parts import (  # noqa: F401 - re-exported: launch.py and the tests read them as pipeline.<name>
     lines_json, compact, PLACEHOLDER_RE, render, brief, threaded, WAVE_TAIL, ANSWERED, RETRY_OUTPUT, NOT_RUN_RE,
@@ -41,6 +41,7 @@ class Pipeline:
         self.rules = ""
         self.fix_count, self.fix_history, self.limit_pending = {}, {}, []
         self.qa_pending = []  # the last QA's design and no-WP items: they stay listed whatever comes after
+        self.conflict_pending = []  # Standards findings an acceptance test pins: listed, never fixed in this run
         self.needs_review = []  # the last review's needs-validation items
         self.concern_pending = []  # DONE_WITH_CONCERNS doubts, kept across cycles and handed to every review
         self.context_given = set()  # packages already re-dispatched once with the whole document
@@ -137,7 +138,8 @@ class Pipeline:
         return [f for f in report["files"] if not any(f == s or f.endswith("/" + s) for s in seen)]
 
     def pending_now(self):
-        return self.qa_pending + list(self.limit_pending) + list(self.concern_pending) + list(self.new_pending)
+        return (self.qa_pending + list(self.limit_pending) + self.conflict_pending + list(self.concern_pending)
+                + list(self.new_pending))
 
     def split_by_limit(self, defects):
         eligible = []
@@ -567,7 +569,24 @@ class Pipeline:
                               "callers": 0}
         return self.close_review({axis: record[axis]["confirmed"] for axis in AXES})
 
+    def check_pins(self, by_axis):
+        """The Standards findings an acceptance test pins leave the fix queue: each becomes a pending item. One lone
+        gate call, and only when some finding may be pinned; a step that fails or answers no JSON pins nothing."""
+        root, standards, pinned = self.plan.get("root"), by_axis["standards"], []
+        args = pinned_args(standards, root)
+        if args:
+            st = self.step(self.seq(["pinned " + " ".join(args)], "pinned"), 0)
+            standards, pinned = split_pinned(standards, root, lines_json(st["output"]) if self.ok(st) else None)
+            for item in map(conflict_item, pinned):
+                if not any(pending_key(p) == pending_key(item) for p in self.conflict_pending):
+                    self.conflict_pending.append(item)
+        review = self.run["review"]
+        review["standards"].update({"confirmed": standards, "pinned": pinned})
+        review["confirmed"] = by_axis["spec"] + standards
+        return {"spec": by_axis["spec"], "standards": standards}
+
     def close_review(self, by_axis):
+        by_axis = self.check_pins(by_axis)
         confirmed = by_axis["spec"] + by_axis["standards"]
         self.reviewed_now(by_axis)
         after = self.seq([f"close-stage review REVIEW={'fail' if confirmed else 'pass'}", "open-stage qa"], "close-stage review")

@@ -1,5 +1,5 @@
 {
-  "code_lines": 7961,
-  "prompt_bytes": 102919,
-  "why": "2.22.0 (design 0032): +160 code lines for the rules at the end of each writer's brief and the acceptance repair in both engines (pipeline.py's module helpers moved to pipeline_parts.py to keep it under 800 lines); +507 prompt bytes for /implement's acceptance_repairs line and the implementer's blocker.in"
+  "code_lines": 8207,
+  "prompt_bytes": 104035,
+  "why": "2.22.1 (design 0033, issue 145): +246 code lines for `agentic.py pinned` and the pin helpers in both engines, with their tests (+47 lines in agentic-implement.js); +1116 prompt bytes for the test-author's and test-auditor's rules and /implement's acceptance conflict line"
 }

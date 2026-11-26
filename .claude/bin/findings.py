@@ -21,6 +21,11 @@ PATH_AFTER = r"(?![A-Za-z0-9_-])"
 ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see the pending items of kind "qa not run")'
 QA_NOT_RUN_FACT = "not run: the environment refused it"
+PIN_PATH = r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*"  # a repo-relative path the gate can pass unquoted
+PIN_MAX_ARGS = 40  # arguments of one pinned call, so the command stays short
+ACCEPTANCE_CONFLICT_DECISION = (
+    "the fix would break the acceptance test that pins this line's text: change the test to check behaviour, "
+    "or waive this rule for this file in the plan's waivers")
 
 
 def tier_of(item, blocking):
@@ -188,3 +193,56 @@ def qa_not_run_items(qa):
 def _not_run_item(cmd, how):
     return {"type": "needs validation", "source": "qa", "wp": None, "file": None, "kind": "qa not run",
             "problem": cmd, "claim": cmd, "fact": QA_NOT_RUN_FACT, "how_to_check": how}
+
+
+def pin_path(finding, root):
+    """The repo-relative path of a Standards reflex finding that may be pinned by an acceptance test: it has a line
+    (a real integer from 1) and a path the gate can pass as an argument. None for any other finding."""
+    if not isinstance(finding, dict) or finding.get("tier") != "reflex":
+        return None
+    line, file = finding.get("line"), finding.get("file")
+    if isinstance(line, bool) or not isinstance(line, int) or line < 1 or not isinstance(file, str) or not file:
+        return None
+    path = _without_root(file, root if isinstance(root, str) else "")
+    if not re.fullmatch(PIN_PATH, path) or set(path.split("/")) & {".", ".."}:
+        return None
+    return path
+
+
+def pinned_args(findings, root):
+    """FILE:LINE for each finding that may be pinned, once each and in order, the first PIN_MAX_ARGS."""
+    args = []
+    for f in findings:
+        path = pin_path(f, root)
+        if path and f"{path}:{f['line']}" not in args:
+            args.append(f"{path}:{f['line']}")
+    return args[:PIN_MAX_ARGS]
+
+
+def _usable_pin(pin):
+    ints = all(isinstance(pin.get(k), int) and not isinstance(pin.get(k), bool) for k in ("line", "test_line"))
+    return isinstance(pin, dict) and ints and all(isinstance(pin.get(k), str) for k in ("file", "test", "text"))
+
+
+def split_pinned(findings, root, answer):
+    """(kept, pinned) of the findings, given the parsed answer of `agentic.py pinned` (or None). A pinned finding is
+    a copy with "pinned_by": {"test", "test_line", "text"}; the kept ones are the same objects. A malformed answer
+    pins nothing."""
+    listed = answer.get("pinned") if isinstance(answer, dict) else None
+    pins = {(p["file"], p["line"]): p for p in listed or [] if isinstance(p, dict) and _usable_pin(p)}
+    wanted = set(pinned_args(findings, root))
+    kept, pinned = [], []
+    for f in findings:
+        path = pin_path(f, root)
+        pin = pins.get((path, f["line"])) if path and f"{path}:{f['line']}" in wanted else None
+        if pin:
+            pinned.append({**f, "pinned_by": {"test": pin["test"], "test_line": pin["test_line"], "text": pin["text"]}})
+        else:
+            kept.append(f)
+    return kept, pinned
+
+
+def conflict_item(finding):
+    """The pending item of a pinned finding: the finding, no fix attempted, and what a person can do."""
+    return {"type": "acceptance conflict", "source": "standards-reviewer", **finding,
+            "decision": ACCEPTANCE_CONFLICT_DECISION}

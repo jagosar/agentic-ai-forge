@@ -38,6 +38,7 @@ Subcommands:
   rules-sync          Installs in .claude/rules/agentic/ the common rules and those of each language of the project.
   codemap [PATH]      Generates the code map (files and public symbols) without going through the model.
   callers             JSON: the public symbols of the changed files and their callers outside the diff (for the reviewer).
+  pinned FILE:LINE... JSON: which lines an acceptance test pins by reading the file as text.
   docs-check          Checks links, anchors and paths cited in the documentation. JSON.
   install [DIR] [--force] [--dry-run] [--allow-dirty]
                       Installs or upgrades the flow in another repo (used by the plugin). Replaces only intact files,
@@ -98,7 +99,9 @@ from core import (  # noqa: E402
 from manifest_check import (  # noqa: E402
     complexity_warnings, frontmatter_model, known_packs, provenance_problems, require_valid, validate
 )
-from repo_scan import PATH_RE, callers, codemap, declared_stack, detect_stack, docs_check, rules_sync  # noqa: E402
+from repo_scan import (  # noqa: E402
+    PATH_RE, callers, codemap, declared_stack, detect_stack, docs_check, pinned, rules_sync
+)
 from verification import acceptance, attribute, baseline, quality, quality_files, run_command, verify  # noqa: E402
 from stage import STAGE_LABELS, check_stage, close_stage, open_stage, snapshot, stage_label  # noqa: E402
 from installer import (  # noqa: E402
@@ -316,6 +319,10 @@ def cmd_callers(args):
     callers()
 
 
+def cmd_pinned(args):
+    pinned(args)
+
+
 def optional_manifest():
     """The manifest, or None before the plan exists: the architect may generate a code map first."""
     try:
@@ -431,7 +438,8 @@ COMMANDS = {
     "close-stage": cmd_close_stage, "briefs": cmd_briefs, "seq": cmd_seq, "run-pipeline": cmd_run_pipeline,
     "verify": cmd_verify, "baseline": cmd_baseline, "save-result": cmd_save_result,
     "sync-permissions": cmd_sync_permissions, "run-docs": cmd_run_docs, "stack": cmd_stack,
-    "rules-sync": cmd_rules_sync, "callers": cmd_callers, "codemap": cmd_codemap, "docs-check": cmd_docs_check,
+    "rules-sync": cmd_rules_sync, "callers": cmd_callers, "pinned": cmd_pinned, "codemap": cmd_codemap,
+    "docs-check": cmd_docs_check,
     "install": cmd_install, "flow-history": cmd_flow_history, "release-notes": cmd_release_notes,
     "run-acceptance": cmd_run_acceptance, "run-review": cmd_run_review, "acceptance": cmd_acceptance,
     "snapshot": cmd_snapshot, "check-wave": cmd_check_wave, "run-wave": cmd_run_wave, "doctor": cmd_doctor,

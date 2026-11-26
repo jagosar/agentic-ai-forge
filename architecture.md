@@ -1,47 +1,41 @@
-# Architecture: the rules travel in the briefs, and a wave blocked by the acceptance tests is repaired once (agentic-flow 2.22.0)
-Type: feature · Size: standard
+# Architecture: a Standards finding pinned by an acceptance test goes to a person, not to a fix (issue 145; agentic-flow 2.22.1)
+Type: fix · Size: standard
 
 ## 1. Goal
 
-A field report from a PowerShell project (native `/implement`, Windows PowerShell 5.1) ended `REVIEW` at wave 2. The acceptance tests wrapped a `List[object]` in `@(...)`, which throws on 5.1. The tests died before testing the code, and two packages ended `BLOCKED` because they cannot edit the acceptance zone. The PowerShell rules have documented that exact trap since 2.15.0, but they did not reach the test-author: the workflow result says `rules: "pointed"`. In 4 of the 5 runs of that cycle, the full text reached no agent. In the native engine the rules text (about 8.5 KB for common plus PowerShell) travels inside `pipeline-plan`'s output, copied by hand by the gatekeeper (a Haiku agent). When the copy is not exact, the checksum fails and the agents get only the rule paths, which they do not read.
+A field run (PowerShell, native engine, ≤ 2.21.1) ended `REVIEW` with build, tests (1537/0) and acceptance green. The acceptance test of AC-810 greps the source for `ShowBalloonTip(10000`. The sequence, read from its `workflow-result.json`: the wave wrote a named constant (as section 7 asks), verification failed AC-810 (`verification_failures[0].fix_cycle: 0`, before any fix cycle), fix 1 put the literal back, the Standards reviewer confirmed "No magic numbers" on that line (`F68e7a69e`), fix 2 (the escalation model) knowingly left the literal and said why, the re-review said NOT_ADDRESSED and the run ended with a `fix limit reached` item that reads as an implementer failure.
 
 This release does two things:
-1. The agents that write code (the test-author and each package) get the rules inside their brief. `agentic.py briefs` writes the brief from disk, and reading it is already their first step.
-2. When a wave is blocked only because the acceptance tests themselves fail, the flow relaunches the test-author with the blockers, then relaunches the blocked packages. This happens once per run, in both engines.
+1. **Detection, deterministic.** After every review, a new read-only command `agentic.py pinned` checks each confirmed Standards reflex finding with a line: if a string literal of an acceptance test, read as code text, occurs on that line, the finding leaves the fix queue and becomes a blocking pending item of type `acceptance conflict`, which names the test. No fix cycle is spent on it, in both engines.
+2. **Prevention, in wave 0.** The test-author is told not to assert on source text when the behaviour can be observed through section 6, and never to pin a form section 7 or the rules forbid; the test-auditor reports such a pin as a blocking finding.
 
 ## 2. Scope
 
 ### Included
 
-- **Rules in the briefs.**
-  - `agentic.py briefs` appends the rules (common and stack languages, full text) and the quality-limits sentence to `AT.md` and to every package's brief.
-  - The prompts of the test-author and of the packages stop carrying the rules, in both engines.
-  - The judges (standards reviewer, QA, re-review on the standards axis) keep today's path: printed when the checksum holds, the paths otherwise.
-- **Acceptance repair.**
-  - An implementer's `BLOCKED` report may say `blocker.in: "acceptance"`: its package is done, and the acceptance tests themselves fail.
-  - When an implement wave fails to close only because of such reports, the flow runs these steps:
-    1. It reopens the acceptance stage.
-    2. It runs the test-author with the blockers.
-    3. It closes the acceptance stage.
-    4. It reopens the wave and relaunches only the blocked packages.
-    5. It closes the wave again.
-  - Once per run, within the agent-call budget. The run records `acceptance_repairs`.
-- **Docs and release 2.22.0.** The guide, `/implement`'s presentation, the implementer's and test-author's definitions, the notes, the budget, and one acceptance file. The 2.21.x acceptance tests move to a named file.
+- `agentic.py pinned FILE:LINE ...`: one JSON line with the pins it found; exit 0 whatever happens.
+- `findings.py`: which findings are checked, how the command's answer splits them, and the pending item; mirrored in the workflow.
+- Both engines: the check in the review's close; the pending list `acceptance conflict`; `review.standards.pinned`.
+- Four conformance scenarios (Annex A).
+- `test-author.md` and `test-auditor.md`: one rule and one checklist item.
+- Release 2.22.1: notes, `/implement`'s presentation, `how-it-works.md`, the budget, the 2.22.0 acceptance file's version pin.
 
 ### Excluded (non-goals)
 
-- A PowerShell-specific grep of the acceptance tests (the report's proposal 1).
-- Telling a helper's failure from missing code in the red run (proposal 2).
-- A repair in a fix wave: only implement waves are repaired.
-- A second test-audit after the repair.
-- A reliable path for the judges' rules (section 11).
-- Making the gatekeeper's copy of `pipeline-plan` reliable.
+- Spec-axis findings, floor-tier findings and finish notes: never checked (a pin does not excuse a correctness or security defect).
+- A finding the reviewer gave without `line`, or the parts `split_by_owner` makes (they have no line): never checked.
+- JavaScript regex literals (`/.../`), string concatenations, values held in variables: not recognised as pins. A pin the command does not see behaves as today.
+- The verification failure that comes first when the wave writes the form the rules ask for (fix 1 of the field run): left to the prevention in wave 0.
+- An implementer reporting a conflict, and the Standards reviewer declaring one (both discussed and declined: section 10).
+- Auto-waiving: the conflict blocks; the person decides.
+- A change to `/architect` or the plan-reviewer about criteria that pin code text (section 11).
 
 ## 3. Stack
 
 Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workflow.mjs`. No package manager, no new dependency.
 
 - Unit and acceptance: `python3 -m unittest discover -s .claude/bin -p "test_*.py"`
+- The repository's own suites, which CI also runs (`.github/workflows/agentic-flow-ci.yml:70-71`): `python3 -m unittest discover -s acceptance` and `python3 -m unittest discover -s qa`
 - The workflow against the conformance scenarios: `node .claude/bin/test_workflow.mjs`
 - Quality limits: `python3 .claude/bin/agentic.py quality`
 - Bench: `python3 -m unittest discover -s bench -p "test_*.py"` and `python3 -m unittest discover -s bench/acceptance`
@@ -49,392 +43,390 @@ Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workfl
 ## 4. Repository structure
 
 ```
-.claude/bin/launch.py                    WP-01  write_briefs appends the rules; render_prompt leaves writers' prompts bare
-.claude/bin/test_brief_rules.py          WP-01  new: unit cases
-.claude/bin/test_quality_limits.py       WP-01  the limits sentence is read from the brief, not the prompt
-.claude/bin/pipeline.py                  WP-02  writers' prompts without rules; acceptance repair
-.claude/bin/pipeline_parts.py            WP-02  new: pipeline.py's module-level helpers, moved to make room
-.claude/workflows/agentic-implement.js   WP-02  the same, in the native engine
-.claude/workflows/pipeline-spec.json     WP-02  prompts without {rules}; test_author_repair; blocker.in
-.claude/bin/conformance.json             WP-02  the rules scenarios updated; repair scenarios
-.claude/bin/test_pipeline.py             WP-02  summary key and EngineTests
-.claude/bin/test_workflow.mjs            WP-02  summary key; the rules test
-.claude/bin/test_qa_recheck.py           WP-02  writers' prompts without the rules, judges' with them
-docs/how-it-works.md                     WP-03  rules and the acceptance repair
-.claude/commands/implement.md            WP-03  presents acceptance_repairs
-.claude/agents/implementer.md            WP-03  when to say blocker.in "acceptance"
-.claude/agents/test-author.md            WP-03  the rules are at the end of the brief
-.claude-plugin/plugin.json               WP-03  2.22.0
-.claude/bin/upgrade.py                   WP-03  NOTES["2.22.0"]
-.claude/flow-budget.json                 WP-03
-.claude/bin/test_zone_stop_gate.py       WP-03  new: the classes of test_acceptance_v221.py without its ReleaseTests
-.claude/bin/test_acceptance_v221.py      WP-03  deleted
-.claude/bin/test_failure_evidence.py     WP-03  its ReleaseTests stop pinning the plugin version
-.claude/bin/test_fix_routing.py          WP-03  the same
-.claude/bin/test_native_usage.py         WP-03  the fallback's rules are read from the brief, not the prompt
-.claude/bin/test_acceptance_v222.py      AT
+.claude/bin/repo_scan.py                 WP-01  pin_fragments, find_pins, pinned (the command), the PIN_* constants
+.claude/bin/agentic.py                   WP-01  cmd_pinned, COMMANDS, the usage line, the import
+.claude/bin/launch.py                    WP-01  "pinned" in SEQ_COMMANDS
+.claude/bin/test_pinned.py               WP-01  new: unit cases of the command and its helpers
+.claude/bin/test_definitions.py          WP-01  the command count (line 510): 37 -> 38
+.claude/bin/findings.py                  WP-02  PIN_PATH, PIN_MAX_ARGS, ACCEPTANCE_CONFLICT_DECISION, pinned_args, split_pinned, conflict_item
+.claude/bin/pipeline.py                  WP-02  close_review checks pins; conflict_pending; pending_now
+.claude/workflows/agentic-implement.js   WP-02  the same, in the native engine, with mirrors of the findings.py helpers
+.claude/bin/conformance.json             WP-02  four scenarios (Annex A)
+.claude/bin/test_pipeline.py             WP-02  the simulated world answers `pinned`
+.claude/bin/test_workflow.mjs            WP-02  the same
+.claude/bin/test_pinned_findings.py      WP-02  new: unit cases of the findings.py helpers
+.claude/agents/test-author.md            WP-03  rule 2 extended
+.claude/agents/test-auditor.md           WP-03  checklist item and severity
+.claude/commands/implement.md            WP-03  the pending item and review.standards.pinned
+docs/how-it-works.md                     WP-03  one paragraph
+.claude-plugin/plugin.json               WP-03  2.22.1
+.claude/bin/upgrade.py                   WP-03  NOTES["2.22.1"]
+.claude/flow-budget.json                 WP-03  code lines and prompt bytes, with the why
+.claude/bin/test_acceptance_v222.py      WP-03  its version pin (line 229): 2.22.1
+.claude/bin/test_pinned_conflict.py      AT
+.claude/quality-baseline.json            by hand: agentic-implement.js's stored lines, raised in WP-02's commit if needed
 .claude/flow-history.json                by hand: regenerated as the last commit
 ```
 
 ## 4b. Existing code context
 
-| What an implementer needs to know | Where it is | Pattern or rule | Source |
+| What an implementer needs to know | Where it is (`file:lines`) | Pattern or rule | Source |
 |---|---|---|---|
-| The native engine gets the plan through the gatekeeper, a Haiku agent that copies a command's output by hand into a structured answer | `.claude/workflows/agentic-implement.js:103-105`, `.claude/agents/gatekeeper.md:1-20` | Why a long text is not reliable on that path | read |
-| The engine prints the rules only when `textSum(plan.rules_text) === plan.rules_sum`; otherwise `RULES` is the paths sentence and `run.rules` is `pointed`. `IMPLEMENTER_RULES` is `RULES` unless `plan.implementer_rules === false` | `.claude/workflows/agentic-implement.js:536-541` | Stays for the judges | read |
-| The fallback engine's equivalents: `self.rules`, `self.impl_rules` | `.claude/bin/pipeline.py:175-176`, `.claude/bin/pipeline.py:343` | Same | read |
-| Where the writers get the rules today: test-author `prompt + RULES`, its revision, the implement/fix prompts `+ IMPLEMENTER_RULES`, the NEEDS_CONTEXT retry | `.claude/workflows/agentic-implement.js:386-411`, `.claude/workflows/agentic-implement.js:420-436`, `.claude/workflows/agentic-implement.js:716-746`, `.claude/bin/pipeline.py:371-418`, `.claude/bin/pipeline.py:419-447`, `.claude/bin/pipeline.py:461-478` | Each one drops the rules | read |
-| The prompt templates carry `{rules}`: `implement`, `fix`, `test_author`, `test_author_revision`, `implement_full` | `.claude/workflows/pipeline-spec.json:15-19`, `.claude/workflows/pipeline-spec.json:26` | `{rules}` leaves those five; `qa`, `standards_reviewer`, `re_review` keep it | read |
-| `rule_files(manifest)` lists the installed rules (common and stack); `render_rules(paths, root)` prints them under "Rules you must follow…", each file without its frontmatter | `.claude/bin/repo_scan.py:59-77` | The brief's rules are `render_rules(rule_files(manifest), ROOT)`: always the full text, never the native pointer | read |
-| `quality_limits_text()`: the limits sentence, `""` without a readable quality baseline | `.claude/bin/verification.py:323-333` | Appended after the rules in the brief | read |
-| `write_briefs(manifest)` writes `.claude/state/briefs/<ID>.md` for each package and `AT` from `brief.slice_architecture` | `.claude/bin/launch.py:268-277`, `.claude/bin/brief.py:84-107` | The rules go after the slice (or after the whole document when the plan cannot be sliced) | read |
-| `render_prompt` (the fallback's one-off commands) fills `{rules}` except for implementers when `implementer_rules` is false; `IMPLEMENTER_PROMPTS = ("implement", "fix", "implement_full")` | `.claude/bin/launch.py:304-308`, `.claude/bin/launch.py:42` | With `{rules}` gone from the writers' templates, the value is ignored there | read |
-| `launch.py` already imports `rule_files` and `quality_limits_text` | `.claude/bin/launch.py:28-29` | Add `render_rules` to the `repo_scan` import | read |
-| The implementer's report: `status` in `DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`; `blocker` `{missing, section, options}` or null | `.claude/workflows/pipeline-spec.json:167-200`, `.claude/agents/implementer.md:47`, `.claude/agents/implementer.md:70` | `blocker` gains an optional `in` | read |
-| The test-author's report: `status` `DONE` or `BLOCKER` | `.claude/workflows/agentic-implement.js:35` | The repair reads it as today | read |
-| `launchWave` / `launch_wave` run a wave's packages, store each report in `run.work_packages[wp]` and return the close command | `.claude/workflows/agentic-implement.js:386-418`, `.claude/bin/pipeline.py:419-447` | The repair calls them with the blocked packages only | read |
-| `runWaves` / `run_waves`: open, launch, close (with the next open-stage in the same `seq`); a close that fails stops with "the wave ended with blockers, missing reports or writes outside ownership". A `seq` stops at its first failing step, so the next open-stage did not run | `.claude/workflows/agentic-implement.js:440-473`, `.claude/bin/pipeline.py:480-512` | The repair goes in that `!good` branch, implement waves only | read |
-| A close that saw writes outside ownership prints `OUTSIDE OWNERSHIP` | `.claude/bin/stage.py:181` | Such a close is never repaired: a new snapshot would accept those writes | read |
-| Wave 0: `open-stage acceptance` (`seqRetry`), the test-author, `closeSeq(['close-stage acceptance AT=<state> --expect red'])`, a revision reopens the stage | `.claude/workflows/agentic-implement.js:716-746`, `.claude/bin/pipeline.py:371-418` | The repair follows the same steps without `--expect` (the code exists by then) | read |
-| The agent-call budget: `plan.max_agent_calls`, `run.agent_calls`, `budgetForCycle` | `.claude/workflows/agentic-implement.js:507-520`, `.claude/bin/pipeline.py:546-560` | The repair runs only when the rest of the run fits in what is left, counted as in section 6 | read |
-| The run record's initial keys | `.claude/workflows/agentic-implement.js:249`, `.claude/bin/pipeline.py:189-191` | `acceptance_repairs: []` joins them | read |
-| The conformance harness: `summarize` in both, the keys `ConformanceTests` compares | `.claude/bin/test_pipeline.py:154-170`, `.claude/bin/test_pipeline.py:216-226`, `.claude/bin/test_workflow.mjs:553-575` | `acceptance_repairs` added to both summaries and to the keys | read |
-| Tests that pin the writers' prompts carrying the rules | `.claude/bin/test_pipeline.py:470-488`, `.claude/bin/test_workflow.mjs:317-330`, `.claude/bin/test_qa_recheck.py:128-130`, `.claude/bin/test_quality_limits.py:126-145`, `.claude/bin/test_native_usage.py:216-232` | To update (WP-02, WP-02, WP-02, WP-01, WP-03) | read |
-| Tests that pin the version `2.21.2` | `.claude/bin/test_acceptance_v221.py:140-153`, `.claude/bin/test_failure_evidence.py:223-226`, `.claude/bin/test_fix_routing.py:263-271` | WP-03 | read |
-| `pipeline.py` is at 800 lines, the file limit; its module-level helpers sit at the top | `.claude/bin/pipeline.py:25-160` | WP-02 moves them to `pipeline_parts.py` | read |
-| `agentic-implement.js` has 824 lines against an allowance of 861, and 64 lines over 120 characters against an allowance of 64 | `.claude/quality-baseline.json:54-57` | No new line over 120 characters | read |
+| A read-only analysis command: one JSON line on stdout, a warning on stderr, exit 0 even on error, `EMPTY_*` shape plus `error` | `.claude/bin/repo_scan.py:270-283` | Copy this shape for `pinned` | read |
+| Module constants with a comment each (`CALLERS_PER_SYMBOL`, `CALLERS_MAX`…) | `.claude/bin/repo_scan.py:178-186` | Name every `PIN_*` limit the same way, and give each a one-line comment (these have none) | read |
+| `repo_scan.py` imports from `core` in one block | `.claude/bin/repo_scan.py:13-16` | Add `at_entity` there | read |
+| Commands: a `cmd_*` wrapper, the `COMMANDS` table, the usage docstring line, the import from `repo_scan` | `.claude/bin/agentic.py:40`, `.claude/bin/agentic.py:101`, `.claude/bin/agentic.py:315-316`, `.claude/bin/agentic.py:427-439` | `pinned` joins each | read |
+| `test_commands_match_the_docstring` holds the usage docstring and `COMMANDS` equal, and pins their count at 37 | `.claude/bin/test_definitions.py:507-510` | Add the usage line; change 37 to 38 | read |
+| `seq` accepts only `SEQ_COMMANDS` | `.claude/bin/launch.py:49-50`, `.claude/bin/launch.py:493-509` | Add `"pinned"` | read |
+| The fallback's gate runs each command with `shlex.split` and merges stdout then stderr | `.claude/bin/launch.py:476-491`, `.claude/bin/launch.py:624-626` | A path with spaces or quotes cannot be an argument: such findings are not checked | read |
+| The acceptance zone: `at_entity(manifest)["files"]`, `acceptance/` by default; `owns(pattern, path)` | `.claude/bin/core.py:231-234`, `.claude/bin/core.py:262-264` | | read |
+| `source_files()`: git's tracked and untracked files, without dependency folders | `.claude/bin/core.py:329-339` | Acceptance tests written in wave 0 are untracked and still listed | read |
+| `findings.py` is pure (no flow imports), mirrored by the workflow; `_without_root` strips the repo root and reads `\` as `/` | `.claude/bin/findings.py:1-8`, `.claude/bin/findings.py:109-122` | New helpers live here; the JS mirrors them | read |
+| A pending item built by a helper with a module constant (`QA_NOT_RUN_DETAIL`, `_not_run_item`) | `.claude/bin/findings.py:22-23`, `.claude/bin/findings.py:168-190` | `conflict_item` and `ACCEPTANCE_CONFLICT_DECISION` follow it | read |
+| The workflow's mirror of those helpers | `.claude/workflows/agentic-implement.js:219-232` | `pinnedArgs`, `splitPinned`, `conflictItem` go beside it | read |
+| `noRoot` (JS mirror of `_without_root`) and `plan.root` | `.claude/workflows/agentic-implement.js:180-190`, `.claude/workflows/agentic-implement.js:194-196` | | read |
+| Pending lists and `pendingNow`; `pendingKey` for dedupe | `.claude/workflows/agentic-implement.js:266-270`, `.claude/workflows/agentic-implement.js:306-318` | Add `conflictPending` after `limitPending` | read |
+| `closeReview`: sets `lastConfirmed`, closes review, opens QA | `.claude/workflows/agentic-implement.js:709-722` | The pin check goes at its start | read |
+| `run.review` is built before `closeReview` in both review paths; `review.standards.waived` is set there | `.claude/workflows/agentic-implement.js:640-657`, `.claude/workflows/agentic-implement.js:697-707` | `closeReview` overwrites `standards.confirmed` and `confirmed`, and sets `standards.pinned` | read |
+| `seq` with one command calls the gate directly; `step`, `ok`, `lastJson` | `.claude/workflows/agentic-implement.js:107-135` | | read |
+| The result decides `REVIEW` when any pending item `blocks` | `.claude/workflows/agentic-implement.js:868-871`, `.claude/bin/pipeline.py:654-655` | A conflict item has `tier: "reflex"`, and the result's check passes no waivers, so it always blocks (a waived finding is never confirmed, so never pinned) | read |
+| The fallback: `__init__` lists, `pending_now`, `close_review` | `.claude/bin/pipeline.py:42-53`, `.claude/bin/pipeline.py:139-140`, `.claude/bin/pipeline.py:570-576` | The same change as the workflow | read |
+| `pipeline.py` imports from `findings` in one block | `.claude/bin/pipeline.py:17-19` | | read |
+| A hand fix (`run-wave --fix`) reads only `confirmed` of each axis from the run record | `.claude/bin/launch.py:341-348` | A pinned finding is never fixed by hand: no change needed (AC-001 checks the record) | read |
+| The simulated worlds: every gate command's default answer | `.claude/bin/test_pipeline.py:54-78`, `.claude/bin/test_workflow.mjs:29-41` | Add `pinned` → `{"pinned": [], "skipped": []}` | read |
+| `run_scenario` returns a summary; `world` + `pipeline.Pipeline` give the full result | `.claude/bin/test_pipeline.py:204-208` | The AT reads `pending` items from the full result | read |
+| The happy path makes exactly 10 gatekeeper calls | `.claude/bin/test_workflow.mjs:345-352` | No `pinned` call without a candidate | read |
+| A scenario's declaration (standards findings, `gate_fail` with an output) | `.claude/bin/conformance.json:908-930`, `.claude/bin/conformance.json:996-1025` (scenarios "callers reach the reviewer" and "a reflex finding blocks until it is fixed") | Annex A uses the same keys | read |
+| Unit tests of findings helpers, header and style | `.claude/bin/test_owner_split.py:1-30` | | read |
+| Command tests in a temporary repo (`Repo`, `MANIFEST` with `acceptance/`) | `.claude/bin/test_agentic.py:34-75`, `.claude/bin/test_agentic.py:906-916` | | read |
+| Release notes: newest first after `2.11.0`'s entry; `2.22.0` at line 156 | `.claude/bin/upgrade.py:156-163` | `2.22.1` goes right before `2.22.0` | read |
+| `/implement`'s pending bullets | `.claude/commands/implement.md:63-67` | One bullet for `acceptance conflict` | read |
+| The 2.22.0 acceptance file pins the version, and forbids other test files from pinning `2.22.0` or `2.21.2` | `.claude/bin/test_acceptance_v222.py:226-252` | Change only line 229 to `"2.22.1"` | read |
+| Quality ratchet: functions ≤ 60 lines, nesting ≤ 4, lines ≤ 120 chars; `agentic-implement.js` is stored at 890 lines and 64 long lines (allowance 920 lines, 64 long lines); `pipeline.py` at 29 long lines | `.claude/quality-baseline.json`, `.claude/bin/quality.py:232-235` | No new line over 120 characters in either engine. The JS's 30-line growth is likely not enough (estimate 30-40 lines, not measured): its stored `lines` is raised by hand in WP-02's commit, with the reason in the message, as `ea92ec5` did (831 → 890) | read |
+| The test-author's black-box rule and the auditor's checklist | `.claude/agents/test-author.md:17-25`, `.claude/agents/test-auditor.md:20-36` | | read |
+| The auditor reads the AT brief, which ends with the rules since 2.22.0 | `.claude/agents/test-auditor.md:18`, design 0032 | It can tell a forbidden form | read |
+| The field run's sequence (wave wrote the constant; fix 1 restored the literal; fix 2 left it) | issue 145; `verification_failures` recorded with `run.fix_cycles` before `fixCycle` increments it (`.claude/workflows/agentic-implement.js:545`, `.claude/workflows/agentic-implement.js:829-832`) | | inferred |
 
-What must not change: the judges' rules, `run.rules`, `pipeline-plan`'s `rules_text`/`rules_sum`, the fix waves, wave 0, the stop gate.
+What must NOT change: the happy path's gate calls; prompts and schemas (`pipeline-spec.json` is untouched); spec findings; waivers; the re-review's verdict handling.
 
 ## 5. Data model
 
-The implementer's `blocker` (schema in `pipeline-spec.json`; both engines read the spec):
+```python
+# findings.py
+PIN_PATH = r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*"  # a repo-relative path the gate can pass unquoted
+PIN_MAX_ARGS = 40                                      # arguments of one pinned call, so the command stays short
+ACCEPTANCE_CONFLICT_DECISION = (
+    "the fix would break the acceptance test that pins this line's text: change the test to check behaviour, "
+    "or waive this rule for this file in the plan's waivers")
+
+# repo_scan.py
+PIN_PATH = r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*"  # the same pattern as findings.PIN_PATH (AC-003 holds them equal)
+PIN_MIN_CHARS = 8           # a shorter fragment pins nothing
+PIN_CODE_CHARS = "()[]{}=;"  # a fragment must hold one: it is code text, not a word or a message
+PIN_WINDOW = 1              # lines around the finding's line that are searched
+PIN_MAX_BYTES = 262144      # a larger acceptance file is not read
+PIN_TEXT_MAX = 160          # characters of the fragment reported
+# A test file that reads a file as text: only such a file can pin the source's text (a behavioural test cannot).
+PIN_READ_RE = re.compile(r"Get-Content|ReadAll(?:Text|Lines)|read_text|readFileSync|readFile|ReadFile|readString"
+                         r"|readAllLines|file_get_contents|File\.read|\bopen\(")
+EMPTY_PINNED = {"pinned": [], "skipped": []}
+```
+
+A pin, as the command reports it:
 
 ```json
-{"missing": "string", "section": "string", "options": ["string"], "in": "design | acceptance"}
+{"file": "src/w.ps1", "line": 2, "test": "acceptance/t.Tests.ps1", "test_line": 5, "text": "ShowBalloonTip(10000"}
 ```
 
-`in` is optional. Without it, or with `design`, the blocker is what it is today.
-
-A brief, after the slice:
-
-```
-<the slice, or the whole architecture.md when it cannot be sliced>
-
-Rules you must follow (common and language). They are printed here, so do not read them from disk:
-
---- .claude/rules/agentic/common.md ---
-...
---- .claude/rules/agentic/powershell.md ---
-...
-Quality limits, checked on every file you write, ...   (only with a readable quality baseline)
-```
-
-A package's brief has no rules when the spec's `constants.implementer_rules` is `false`. `AT.md` always has them.
-
-The run record gains:
+A pinned finding: the finding with `"pinned_by": {"test", "test_line", "text"}`. The pending item:
 
 ```json
-"acceptance_repairs": [{"wave": 2, "wps": ["WP-02", "WP-03"], "test_author": "DONE"}]
+{"type": "acceptance conflict", "source": "standards-reviewer", "...the pinned finding's fields...": "",
+ "decision": "<ACCEPTANCE_CONFLICT_DECISION>"}
 ```
 
-`test_author` holds the test-author's report status, or `null` without a report.
+`run.review.standards.pinned`: the pinned findings of that review (`[]` when none). The run's result gains no new key.
 
 ## 6. Contracts between modules
 
-**`launch.py` (WP-01):**
+### C1 · `agentic.py pinned [FILE:LINE ...]` (WP-01; consumed by WP-02 by signature, by the AT)
 
-```python
-def brief_rules(manifest, ident)
-    """The rules section a brief ends with: render_rules(rule_files(manifest), ROOT) + quality_limits_text(),
-    or "" for a package (any ident other than "AT") when the spec's constants.implementer_rules is False."""
-```
+- Order: with no arguments, it prints the empty shape at once; otherwise it reads the manifest first (a missing manifest is the error path), then checks the arguments.
+- Prints one JSON line on stdout, `{"pinned": [pin, ...], "skipped": [arg, ...]}`, and exits 0. On any unexpected exception: a line `[agentic] pinned skipped: <Type>: <msg>` on stderr, then `{"pinned": [], "skipped": [], "error": "<Type>: <msg>"}`, exit 0. With no arguments: `{"pinned": [], "skipped": []}` without reading the manifest.
+- **An argument** is split at its last `:`. It is skipped (listed in `skipped`, once, in argument order) when the path does not fully match `PIN_PATH`, has a segment `.` or `..`, the line part does not fully match `[1-9][0-9]*`, or `ROOT / path` is not a file. The source file is read with the same rules as the tests (UTF-8 with `errors="replace"`, `\r` stripped; larger than `PIN_MAX_BYTES`: skipped). A test file that is the finding's own file is not searched for that argument (a test never pins itself). A repeated argument is ignored after its first appearance.
+- **The tests**: the files of `source_files()` owned by any pattern of `at_entity(load_manifest())["files"]` (`owns`), in sorted order, each at most `PIN_MAX_BYTES` bytes (larger ones are left out), read as UTF-8 with `errors="replace"`, split on `\n` with `\r` stripped.
+- **`pin_fragments(line) -> list[str]`** (pure): for each match, in order, of `'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"` in the line, its content is split on `\.\*\??|\.\+\??|\\[sSdDwW][*+?]?|[*^$]`; each piece has `\\(.)` replaced by the character, is stripped of whitespace, and is kept when it has at least `PIN_MIN_CHARS` characters and contains at least one character of `PIN_CODE_CHARS`. `'ShowBalloonTip\(10000'` gives `["ShowBalloonTip(10000"]`; `'*Get-Item -Path*'` gives `[]` (no code character); `"a(b"` gives `[]` (too short).
+- **Which tests can pin a path:** a test file counts for an argument only when its text matches `PIN_READ_RE` (it reads some file as text) and contains the argument's file name (the last path segment, compared case-insensitively). Other test files are not searched for that argument.
+- **`find_pins(path, line, tests) -> dict | None`** (pure over text): `tests` is `[(test_path, [lines])]`, already reduced to the files that can pin `path`. The source window is lines `max(1, line - PIN_WINDOW) .. line + PIN_WINDOW` of `path` (those that exist). The answer is the first `(test_path, test_line, fragment)`, in the order test path, test line ascending, fragment order, whose fragment occurs as a substring of a window line; `text` is the fragment cut to `PIN_TEXT_MAX` characters. `None` when nothing matches.
+- `pinned` lists at most one pin per argument, in argument order.
 
-`write_briefs` writes `body + brief_rules(manifest, ident)`, where `body` is the slice (or the whole text) with its trailing newlines kept as today.
+### C2 · `findings.py` (WP-02; mirrored in the workflow)
 
-**Both engines (WP-02), equivalent in every scenario:**
+- `pin_path(finding, root) -> str | None`: `None` unless the finding is a dict with `tier == "reflex"`, a `line` that is an `int` (not a `bool`) and ≥ 1, and a non-empty string `file`. The path is `_without_root(file, root)` (`root` a string, else `""`); `None` unless it fully matches `PIN_PATH` and has no segment `.` or `..`.
+- `pinned_args(findings, root) -> list[str]`: `f"{pin_path(f, root)}:{f['line']}"` for each finding with a path, in order, without repeats, the first `PIN_MAX_ARGS`.
+- `split_pinned(findings, root, answer) -> (kept, pinned)`: `answer` is the command's parsed JSON or `None`. Its usable pins are the entries of `answer["pinned"]` (when `answer` is a dict and that is a list) that are dicts with a string `file`, `test` and `text` and integer `line` and `test_line` (a `bool` is not an integer in Python; a float such as `3.0` is not one either. The command only prints ints, so JS's `Number.isInteger` is enough there). A finding is pinned when its `pin_path` and `line` equal a usable pin's `file` and `line` and its argument is among `pinned_args(findings, root)`. `kept`: the other findings, the same objects, in order. `pinned`: copies of the pinned ones with `"pinned_by": {"test", "test_line", "text"}` from that pin, in order. A malformed answer pins nothing.
+- `conflict_item(finding) -> dict`: `{"type": "acceptance conflict", "source": "standards-reviewer", **finding, "decision": ACCEPTANCE_CONFLICT_DECISION}`.
+- JS mirrors, same names in camelCase: `pinPath(f)`, `pinnedArgs(findings)`, `splitPinned(findings, answer)` returning `{ kept, pinned }`, `conflictItem(f)`, all reading `plan.root` through `str(plan.root)`, with `PIN_PATH`, `PIN_MAX_ARGS` and `ACCEPTANCE_CONFLICT_DECISION` equal to the Python values. `Number.isInteger` stands for the `int` check, and the JS `PIN_PATH` is anchored (`new RegExp('^(?:' + PIN_PATH + ')$')`) because Python uses `fullmatch`.
 
-- The writers' prompts no longer end with the rules. These are the `implement`, `fix`, `implement_full`, `test_author` and `test_author_revision` prompts, plus the new `test_author_repair`.
-- The `implement_full` prompt names the brief: `... This time your brief is architecture.md, whole: read it and implement. The rules you must follow are at the end of {brief}. ...`.
-- The `implement` and `fix` prompts add one sentence: `If your package is done and the acceptance tests themselves fail (an error inside a test or its doubles, not in your code), return BLOCKED with blocker.in "acceptance" and, in missing, each failing test, its file and its error.`
-- `acceptance_blocked(wp_ids, reports)` (JS `acceptanceBlocked`) returns the sorted ids of the packages whose report is `BLOCKED` with `blocker.in === "acceptance"`. It returns them only when every other report of `wp_ids` is `DONE` or `DONE_WITH_CONCERNS`; otherwise it returns `[]`. A missing report counts as not done.
-- The repair, in the `!good` branch of an implement wave, runs only when all of these hold:
-  - the run has not repaired yet;
-  - the close output does not contain `OUTSIDE OWNERSHIP`;
-  - `acceptance_blocked` is not empty;
-  - `max_agent_calls` is unset, or what is left (`max_agent_calls - run.agent_calls`) covers the rest of the run, counted as `budgetAtStart` counts it: 1 (the test-author) + the blocked packages + the packages of the later waves + 2 (reviewers) + 1 (QA) + 1 if `plan.docs`.
-- The repair's steps:
-  1. `seqRetry(['open-stage acceptance'])`. If it fails, the run stops `wave <N>`: `the acceptance stage could not be reopened to repair the tests`.
-  2. The test-author, label `test-author (repair)`, id `AT`, with prompt `test_author_repair` rendered with `brief=brief("AT")`, `wave=N` and `blockers`:
-     ```
-     Repair the acceptance tests (your brief is {brief}). The code of wave {wave} is written, and these packages could not finish because the acceptance tests themselves fail, as JSON:
-     {blockers}
-     Fix the tests or their doubles in your zone so that they test what the criteria say. Do not weaken what a criterion checks and do not touch production code. Run the acceptance command before you report.
-     ```
-     `{blockers}` is `compact([{"wp": id, "missing": report.blocker.missing}])`, in the order of the blocked ids.
-  3. `closeSeq(['close-stage acceptance AT=<done|blocker>'])`, without `--expect`. Push `{stage: 'acceptance repair (wave N)', ok, check}`, then append `{wave, wps, test_author}` to `acceptance_repairs`. If the test-author is not `DONE` or the close fails, the run stops `wave <N>`: `the test-author could not repair the acceptance tests`.
-  4. `seqRetry(['open-stage <N>'])` (a failure stops `wave <N>`: `the stage could not be opened`), then `launchWave(N, blocked, null)` and its close command run as a `seq` of that close alone (never with the next open-stage). Its marks hold only the relaunched packages: the others' ledger states stay `done`.
-  5. Push `{stage: 'wave N (after repair)', ok, check}` and add its gate denials. A close that fails stops with today's detail. A close that passes continues: the fallback calls `self.wave_done(wave)` as `run_waves` does after a good close (`.claude/bin/pipeline.py:504-505`; the native engine has no equivalent); the last wave runs `WAVE_TAIL`; otherwise the next wave opens on its own (`opened = false`).
-- Without a repair, the `!good` branch stops exactly as today.
+### C3 · The engines' review close (WP-02)
+
+At the start of `closeReview(byAxis)` (JS) and `close_review(by_axis)` (Python), before anything else:
+
+1. `args = pinnedArgs(byAxis.standards)` (Python: `pinned_args(by_axis["standards"], self.plan.get("root"))`; `split_pinned` takes the same root). When empty: no gate call, `run.review.standards.pinned = []`, and the rest is as today.
+2. Otherwise one gate call, alone, labelled `pinned`: the command `pinned <args joined by one space>`. Its answer is `lastJson(output)` when the step exists and exited 0, else `null`.
+3. `{kept, pinned} = splitPinned(byAxis.standards, answer)`; `byAxis` becomes `{spec, standards: kept}`. Each pinned finding's `conflictItem` joins `conflictPending` (`self.conflict_pending`) unless an item with the same `pendingKey` is there.
+4. `run.review.standards.confirmed = kept`, `run.review.standards.pinned = pinned`, `run.review.confirmed = [...spec, ...kept]`.
+5. The rest of today's `closeReview` runs with the new `byAxis`: `lastConfirmed`, the `REVIEW=pass|fail` mark (from what is left) and the returned `confirmed` exclude the pinned findings.
+
+`pendingNow()` / `pending_now()` become `[...qaPending, ...limitPending, ...conflictPending, ...concernPending, ...newPending]`. `conflictPending` starts empty and is kept for the whole run.
 
 ## 7. Conventions
 
-- English everywhere; usage errors keep the `Uso:` prefix (design 0016).
-- No type annotations in signatures (Python 3.9), as in the rest of `.claude/bin`. This overrides the python rules' "type annotations on every public signature": it is the existing code's style, not a finding.
-- Every `open` and `read_text` names `encoding="utf-8"`.
-- The two engines change together. A scenario that differs in `prompts`, `gate_calls`, `agents` or `acceptance_repairs` fails `ConformanceTests`.
-- This repository's quality phase measures `.claude/bin` and `.claude/workflows`, the tests of this design included:
-  - no line over 120 characters;
-  - no new function over 60 lines (100 in a test), nested deeper than 4;
-  - no new file over 800 lines.
-- Recorded allowances this design must not exceed:
-  - `agentic-implement.js`: 861 lines and 64 long lines (824 and 64 today);
-  - `test_pipeline.py`: 16 long lines;
-  - `pipeline.py`: 800 lines (800 today).
-- The guides do not cite flow version numbers. Commit format `type: summary`; the flow history is regenerated as the last commit.
+- English for code, comments, prompts and docs; the repository's existing style.
+- Standard library only. `findings.py` keeps no import from the flow.
+- No line over 120 characters in any file you touch; functions ≤ 60 lines, nesting ≤ 4 (`agentic.py quality`).
+- Every limit is a named module constant with a one-line comment.
+- The JS mirror and the Python helper keep the same names (camelCase in JS) and the same behaviour; a comment above the JS mirror names the Python function.
+- A command that analyses never stops the flow: on error it prints its empty shape with `error` and exits 0.
+- Docs and notes never name a flow version except in `upgrade.NOTES` and `plugin.json`.
+- Commit messages: `type: summary` in lowercase (`feat:`, `fix:`, `test:`, `release:`, `design:`, `chore:`), ending with the session's attribution lines.
 
 ## 8. Work packages and acceptance criteria
 
 ### Acceptance criteria
 
-- AC-001 · The test-author's brief carries the language rules (reproduces the field bug)
-  - Scenario: a temporary repo made with the tests' `Repo` helper (`.claude/bin/test_agentic.py:45-76`) from its default manifest with `"stack": ["powershell"]`. The library is copied into `.claude/rules-library/` and `agentic.py rules-sync` has run. `agentic.py quality --init` has run.
-  - Action: `agentic.py briefs`.
-  - Expected: `.claude/state/briefs/AT.md` contains:
-    - `--- .claude/rules/agentic/common.md ---`;
-    - `--- .claude/rules/agentic/powershell.md ---`;
-    - `argument types do not match`;
-    - `Quality limits, checked on every file you write`.
-
-    `WP-01.md` contains the same four. Before this release, `AT.md` contains none of them.
-  - Must not: a brief that names the rule paths without their text; frontmatter (`paths:`) inside the brief.
-  - Check: `test_acceptance_v222.py`
+- AC-001 · A pinned reflex finding goes to pending without a fix, in both engines (the bug of issue 145)
+  - Scenario: Annex A scenario "a reflex finding pinned by an acceptance test goes to pending". Today both engines send the finding to WP-02 as a fix.
+  - Action: the fallback engine runs it (`test_pipeline.run_scenario`, and `test_pipeline.world` + `pipeline.Pipeline` for the full result); the native one through `node .claude/bin/test_workflow.mjs --dump`.
+  - Expected: the gates contain `pinned src/b/x.py:3` exactly once; `fix_cycles` 0; `result` `REVIEW`; `pending` types `["acceptance conflict"]`; that item has `wp` `WP-02`, `file` `/repo/src/b/x.py`, `tier` `reflex`, `pinned_by` `{"test": "acceptance/test_x.py", "test_line": 12, "text": "limit(10000"}` and `decision` equal to `findings.ACCEPTANCE_CONFLICT_DECISION`; in the full result `review.standards.confirmed` is `[]`, `review.standards.pinned` has 1 item, and `launch._record_items(result, "STANDARDS", False)` (what a hand fix reads) is `[]`. Both engines agree on result, failed_stage, detail, fix_cycles, pending, gates, gate_calls, agents and prompts.
+  - Must not: any implementer call labelled `(fix)`; a `fix limit reached` item; the result `OK`.
+  - Check: `test_pinned_conflict.py`, AC-001 tests.
+  - WP: WP-02
+- AC-002 · A `pinned` step that fails or answers no JSON changes nothing
+  - Scenario: Annex A scenario "a pinned step that cannot answer leaves the finding to be fixed".
+  - Action: both engines run it.
+  - Expected: the gates contain `pinned src/b/x.py:3` exactly once; `fix_cycles` 1; `result` `OK`; `pending` `[]`; both engines agree as in AC-001.
+  - Must not: a stop; an `acceptance conflict` item.
+  - Check: `test_pinned_conflict.py`, AC-002 tests.
+  - WP: WP-02
+- AC-003 · Only Standards reflex findings with a line and a passable path are checked
+  - Scenario: Annex A scenario "only reflex findings with a line are checked for pins"; the default happy path (no findings); unit calls of the helpers.
+  - Action: both engines run the two runs; `findings.pinned_args` and `findings.split_pinned` are called directly.
+  - Expected: in the scenario, no gate starts with `pinned`, `fix_cycles` 1, `result` `OK`. The happy path makes no `pinned` call (the native engine's 10 gatekeeper calls stand). `pinned_args` of `[reflex line 3 file "/repo/src/a.py", reflex line 3 same file, reflex line True, reflex line 0, finish line 3, reflex file "src/a b.py" line 3, reflex file "../x.py" line 3, reflex with no line]` with root `/repo` is `["src/a.py:3"]`; 45 distinct reflex findings with lines give 40 arguments. `split_pinned` with the answers `None`, `{}`, `{"pinned": "x"}` and `{"pinned": [{"file": "src/a.py", "line": "3", "test": "t", "test_line": 1, "text": "x"}]}` pins nothing and returns the same objects. `findings.PIN_PATH == repo_scan.PIN_PATH`.
+  - Must not: a spec, floor or finish finding checked; a finding pinned by an entry for another line.
+  - Check: `test_pinned_conflict.py`, AC-003 tests.
+  - WP: WP-02
+- AC-004 · A pinned finding leaves the re-review and stays pending while another is fixed
+  - Scenario: Annex A scenario "a pinned finding is not re-reviewed and stays pending".
+  - Action: both engines run it.
+  - Expected: the gate `pinned src/b/x.py:3 src/b/x.py:9` exactly once; one fix cycle (a `WP-02 (fix)` call); the standards re-review prompt contains the fingerprint (`findings.fingerprint` of the finding with `"axis": "standards"`) of the line-9 finding and not that of the line-3 one; `result` `REVIEW`; `pending` `["acceptance conflict"]`; both engines agree as in AC-001.
+  - Must not: a second `pinned` gate (nothing reflex is left confirmed after the re-review); the line-3 finding's problem text in a fix prompt.
+  - Check: `test_pinned_conflict.py`, AC-004 tests.
+  - WP: WP-02
+- AC-005 · `pinned` finds a literal of an acceptance test on the finding's line
+  - Scenario: a temporary repo (the `Repo` of `test_agentic.py`, whose manifest has `acceptance.files` = `["acceptance/"]`). `src/w.ps1`: line 1 `param()`, line 2 `  $n.ShowBalloonTip(10000, 'a', 'b', 'Info')`, line 3 `# end`, line 4 `Write-Output ('ok')`. `acceptance/t.Tests.ps1`: line 1 `$src = Get-Content "$PSScriptRoot/../src/w.ps1" -Raw`, lines 2-4 `# t`, line 5 `        $src | Should -Match 'ShowBalloonTip\(10000'`. `tests/u.Tests.ps1` (outside the zone) line 1: `"Write-Output ('ok')"`.
+  - Action: `agentic.py pinned src/w.ps1:2`, then `agentic.py pinned src/w.ps1:4`.
+  - Expected: the first prints, as its last stdout line, `{"pinned": [{"file": "src/w.ps1", "line": 2, "test": "acceptance/t.Tests.ps1", "test_line": 5, "text": "ShowBalloonTip(10000"}], "skipped": []}`, exit 0. The second prints `{"pinned": [], "skipped": []}`, exit 0 (line 4 is two lines from line 2; the literal that matches line 4 sits outside the zone).
+  - Must not: a pin from a file outside the acceptance zone; an exit other than 0.
+  - Check: `test_pinned_conflict.py`, AC-005 tests.
   - WP: WP-01
-
-- AC-002 · The packages' briefs follow implementer_rules, and an unsliceable plan still ends with the rules
-  - Scenario: as AC-001.
-  - Action:
-    - (a) the spec's `constants.implementer_rules` set to `false` (the test writes its own copy of `pipeline-spec.json` into the repo's `.claude/workflows/`), then `agentic.py briefs`;
-    - (b) with the spec restored, a manifest whose packages have no `acs` (the plan cannot be sliced), then `agentic.py briefs`.
-  - Expected:
-    - (a) `AT.md` still contains `--- .claude/rules/agentic/powershell.md ---`, and `WP-01.md` contains no `Rules you must follow`;
-    - (b) `WP-01.md` starts with the plan's first line and ends with the rules section.
-  - Must not: the test-author left without rules by `implementer_rules`.
-  - Check: `test_acceptance_v222.py`
+- AC-006 · `pinned` ignores weak fragments, skips bad arguments, and never fails
+  - Scenario: the repo of AC-005, with `acceptance/t.Tests.ps1` lines 6-8: `'ShowBalloonTip'`, `'(10000'`, `'*Get-Item -Path*'`, and line 9 `$v = Get-Content "$PSScriptRoot/../src/v.ps1" -Raw`; `src/v.ps1` line 1 `ShowBalloonTip ; (10000 ; Get-Item -Path x`; `src/m.ps1` line 1 `throw "bad (input) value"`; `acceptance/b.Tests.ps1` line 1 `{ Invoke-M } | Should -Throw "bad (input) value"` (a behavioural test: it reads no file and does not name `m.ps1`).
+  - Action: `agentic.py pinned src/v.ps1:1 src/m.ps1:1 src/w.ps1:0 src/w.ps1:x ../w.ps1:2 src/none.ps1:1 src/w.ps1 src/w.ps1:2 src/w.ps1:2`; then `agentic.py pinned src/w.ps1:2` in a repo whose `architecture.md` has no manifest block and which also holds `src/w.ps1`.
+  - Expected: the first prints `{"pinned": [<the AC-005 pin>], "skipped": ["src/w.ps1:0", "src/w.ps1:x", "../w.ps1:2", "src/none.ps1:1", "src/w.ps1"]}` (nothing for `src/v.ps1:1` nor for `src/m.ps1:1`; `src/w.ps1:2` once), exit 0. The second: exit 0, a last line with `"pinned": []` and a string `error`.
+  - Must not: a pin from a fragment shorter than 8 characters or without a character of `()[]{}=;`; a pin from a test file that does not read a file as text or does not name the finding's file; a traceback with a non-zero exit.
+  - Check: `test_pinned_conflict.py`, AC-006 tests.
   - WP: WP-01
-
-- AC-003 · The writers' prompts carry no rules; the judges' do, in both engines
-  - Scenario: the conformance scenarios `printed rules reach the agents`, `rules text that arrives damaged falls back to the paths` and `the implementer can be left without the rules`, as updated by WP-02.
-  - Action: `test_pipeline.run_scenario(<scenario>)`, and `node .claude/bin/test_workflow.mjs --dump`.
-  - Expected:
-    - In every scenario no `implementer` or `test-author` prompt contains `RULE-TEXT` or `Rules you must follow`, and each names its brief (`.claude/state/briefs/`).
-    - In `printed rules reach the agents`, every `standards-reviewer` and `qa` prompt contains `RULE-TEXT`.
-    - In the damaged scenario, the `standards-reviewer` prompts contain `Rules you must follow (language and common): .claude/rules/agentic/common.md`.
-    - The native engine's prompts equal the fallback's.
-  - Must not: the judges losing the rules; the engines differing.
-  - Check: `test_acceptance_v222.py`
-  - WP: WP-02
-
-- AC-004 · A wave blocked only by the acceptance tests is repaired and resumed, in both engines
-  - Scenario: the conformance scenario `a wave blocked by the acceptance tests is repaired and resumed`, on the conformance plan (waves 1 and 2; WP-01 and WP-02 in wave 1, WP-03 in wave 2):
-    - in wave 1, WP-01 answers `DONE` and WP-02 answers `BLOCKED` with `blocker` `{"missing": "test_ac_002 dies in its double: argument types do not match", "section": "8", "in": "acceptance"}`;
-    - the gate call `close-stage 1 WP-01=done WP-02=blocker` answers exit 3 (a `gate_fail` entry matched by that prefix);
-    - its relaunch answers `DONE`.
-  - Action: `test_pipeline.run_scenario(<scenario>)`, and `node .claude/bin/test_workflow.mjs --dump`.
-  - Expected:
-    - `result` `OK`.
-    - `acceptance_repairs` == `[{"wave": 1, "wps": ["WP-02"], "test_author": "DONE"}]`.
-    - The prompt `test-author:test-author (repair)#1` contains `test_ac_002 dies in its double` and `.claude/state/briefs/AT.md`.
-    - The gate calls contain, in this order: `open-stage acceptance`, `close-stage acceptance AT=done`, `open-stage 1`, and a `close-stage 1` that marks `WP-02=done` and no `WP-01`.
-    - WP-01 is called once and WP-02 twice.
-    - The native engine's `result`, `acceptance_repairs`, `gate_calls`, `agents` and `prompts` equal the fallback's.
-  - Must not: WP-01 relaunched; `--expect red` on the repair's close; the engines differing.
-  - Check: `test_acceptance_v222.py`
-  - WP: WP-02
-
-- AC-005 · No repair when the wave is not blocked only by the acceptance tests, or twice
-  - Scenario: conformance scenarios, one per case:
-    - (a) `a design blocker beside an acceptance blocker stops as before`: WP-01 is `BLOCKED` without `in`, WP-02 is `BLOCKED` with `in: "acceptance"`;
-    - (b) `writes outside ownership are never repaired`: as AC-004, but the failing `close-stage 1` output contains `OUTSIDE OWNERSHIP`;
-    - (c) `the acceptance repair runs once per run`: wave 1 is repaired as in AC-004, then WP-03 in wave 2 is `BLOCKED` with `in: "acceptance"` and `close-stage 2` fails;
-    - (d) `a test-author that cannot repair stops the run`: as AC-004, with the repair's test-author answering `BLOCKER`.
-  - Action: `test_pipeline.run_scenario(<scenario>)`, and `node .claude/bin/test_workflow.mjs --dump`.
-  - Expected:
-    - (a) and (b): `result` `REVIEW`, `failed_stage` `wave 1`, `detail` `the wave ended with blockers, missing reports or writes outside ownership`, no `test-author (repair)` call, `acceptance_repairs` `[]`.
-    - (c): `failed_stage` `wave 2`, the same detail, and exactly one `test-author (repair)` call.
-    - (d): `failed_stage` `wave 1`, `detail` `the test-author could not repair the acceptance tests`, `acceptance_repairs` `[{"wave": 1, "wps": ["WP-02"], "test_author": "BLOCKER"}]`, WP-02 called once.
-    - Both engines agree in each case.
-  - Must not: a repair that relaunches a package after the test-author failed; a second repair.
-  - Check: `test_acceptance_v222.py`
-  - WP: WP-02
-
-- AC-006 · The budget and the fix waves are respected
-  - Scenario: conformance scenarios:
-    - (a) `a repair that does not fit the budget stops as before`: as AC-004, with `max_agent_calls` 9. The start check needs 8 (2 for wave 0, 3 packages, 2 reviewers, QA); when wave 1 closes 4 calls are spent, 5 are left, and the repair needs 6 (test-author, WP-02, WP-03, 2 reviewers, QA);
-    - (b) `a fix wave blocked by the acceptance tests is not repaired`: verification fails, WP-02's fix answers `BLOCKED` with `in: "acceptance"`, and `close-stage 1 WP-02=blocker` fails.
-  - Action: `test_pipeline.run_scenario(<scenario>)`, and `node .claude/bin/test_workflow.mjs --dump`.
-  - Expected:
-    - (a): `failed_stage` `wave 1`, today's detail, no `test-author (repair)` call.
-    - (b): `failed_stage` `fix wave 1`, detail `the fix ended with blockers or writes outside ownership`, no `test-author (repair)` call.
-    - Both engines agree.
-  - Must not: a repair that exceeds `max_agent_calls`; a repair in a fix wave.
-  - Check: `test_acceptance_v222.py`
-  - WP: WP-02
-
-- AC-007 · The spec and the definitions say how to ask for a repair
-  - Scenario: this repository.
-  - Action: read `pipeline-spec.json`, `.claude/agents/implementer.md`, `.claude/agents/test-author.md`, `.claude/commands/implement.md`.
-  - Expected:
-    - The `implementer` schema's `blocker.properties.in` has `enum` `["design", "acceptance"]`.
-    - The prompts `implement` and `fix` contain `blocker.in "acceptance"`.
-    - None of `implement`, `fix`, `implement_full`, `test_author`, `test_author_revision`, `test_author_repair` contains `{rules}`; `test_author_repair` contains `{brief}`, `{wave}` and `{blockers}`.
-    - `implementer.md` contains `"acceptance"` on the line that describes `blocker`.
-    - `test-author.md` contains `end of your brief`.
-    - `implement.md` has exactly one line containing `` `acceptance_repairs` ``.
-  - Must not: `{rules}` left in a writer's prompt.
-  - Check: `test_acceptance_v222.py`
-  - WP: WP-02 (spec), WP-03 (definitions)
-
-- AC-008 · Docs and release 2.22.0
-  - Scenario: this repository.
-  - Action: read `plugin.json`, `upgrade.NOTES`, `docs/how-it-works.md`, the test files.
-  - Expected:
-    - Version `2.22.0`.
-    - `NOTES["2.22.0"]` is the key right above `"2.21.2"`, with one note containing `brief` and one containing `acceptance_repairs`.
-    - The guide contains `acceptance_repairs` and `end of their brief`, and does not contain `2.22.0`.
-    - The only `test_acceptance*.py` is `test_acceptance_v222.py`.
-    - `test_zone_stop_gate.py` holds the classes `TestAuthorGateTests`, `QaGateTests`, `FailOpenTests` and `PackageGateTests`.
-    - No test file other than `test_acceptance_v222.py` has a line that contains both `version` and `"2.21.2"` or both `version` and `"2.22.0"`. No test reads `test_acceptance_v221.py`.
-  - Must not: `2.22.0` in `docs/how-it-works.md`.
-  - Check: `test_acceptance_v222.py`
+- AC-007 · The test-author and the test-auditor are told
+  - Scenario: the repository's definitions.
+  - Action: read `.claude/agents/test-author.md` and `.claude/agents/test-auditor.md`.
+  - Expected: `test-author.md` has a line that contains both `source text` and `section 7`; `test-auditor.md` has a line that starts with `   - **Pins the code's form:**` and contains `High`, and the first bullet under its `# Severity` heading contains `pins a form`.
+  - Must not: the checklist item outside the numbered step 3 of the auditor's process (it must sit after the **Wrong** item).
+  - Check: `test_pinned_conflict.py`, AC-007 test.
+  - WP: WP-03
+- AC-008 · Release 2.22.1
+  - Scenario: the repository.
+  - Action: read the release files; run `python3 .claude/bin/agentic.py quality`.
+  - Expected: `.claude-plugin/plugin.json`'s version, as a tuple of ints, is ≥ `(2, 22, 1)`; `upgrade.NOTES["2.22.1"]` exists, its key comes right before `"2.22.0"` in `list(upgrade.NOTES)`, some note contains `acceptance conflict` and some contains `pinned`; `.claude/commands/implement.md` has exactly one line containing `` `acceptance conflict` ``; `docs/how-it-works.md` contains `acceptance conflict` and `agentic.py pinned` and does not contain `2.22.1`; `quality` exits 0.
+  - Must not: a line of `test_acceptance_v222.py` that contains both `plugin["version"]` and `"2.22.0"`.
+  - Check: `test_pinned_conflict.py`, AC-008 test (flow repo only).
   - WP: WP-03
 
 ### Work packages
 
-#### WP-01 · The rules in the briefs
+#### WP-01 · The `pinned` command
 - Wave 1.
-- Files: `.claude/bin/launch.py`, `.claude/bin/test_brief_rules.py`, `.claude/bin/test_quality_limits.py`.
-- Implements `brief_rules` and the change to `write_briefs` (section 6).
-- ACs: AC-001, AC-002.
-- **Patterns to mirror:**
-  - `.claude/bin/launch.py:268-277`: `write_briefs`.
-  - `.claude/bin/launch.py:304-308`: how `render_prompt` reads `constants.implementer_rules`.
-  - `.claude/bin/repo_scan.py:59-77`: `rule_files`, `render_rules`.
-  - `.claude/bin/test_quality_limits.py:101-145`: a repo with rules installed and a quality baseline.
+- Files: `.claude/bin/repo_scan.py`, `.claude/bin/agentic.py`, `.claude/bin/launch.py`, `.claude/bin/test_pinned.py`, `.claude/bin/test_definitions.py` (line 510 only: `37` → `38`).
+- Implements C1. Defines its own `PIN_PATH` (section 5); it imports nothing from `findings.py`.
+- ACs: AC-005, AC-006.
+- **Patterns to mirror:** `.claude/bin/repo_scan.py:270-283` (the command's shape, stderr warning, exit 0); `.claude/bin/repo_scan.py:178-186` (constants); `.claude/bin/agentic.py:315-316` and `.claude/bin/agentic.py:427-439` (wrapper and table); `.claude/bin/test_agentic.py:906-916` (a command test in a temporary `Repo`).
 - **Gotchas:**
-  - Use `render_rules(rule_files(manifest), ROOT)`, never `rules_text(manifest, native=...)`: the brief is read from disk, so the native pointer does not apply.
-  - `test_quality_limits.py:126-139` asserts the implementer's prompt ends with the limits sentence. Replace that with the same assertion on `.claude/state/briefs/WP-01.md` (after `agentic.py briefs`), and do not assert anything about the prompt: it comes from the live `pipeline-spec.json`, which WP-02 changes in the same wave (AC-003 covers the prompt). Its assertions on `plan["rules_text"]` stay.
-  - `render_prompt` needs no change: the writers' templates lose `{rules}` in WP-02, and `render` ignores extra values. Leave it, and do not add a second rules path.
-  - `test_acceptance_v222.py`'s other ACs are red until WP-02 and WP-03: expected in wave 1. So are `test_acceptance_v221.py`'s "the only acceptance file" and `test_fix_routing.py`'s check of it, from wave 0 until WP-03, and `test_native_usage.py:216-232` from WP-02 until WP-03.
-- **Exact imports and APIs:** `from repo_scan import injected_by_claude_code, render_rules, rule_files, rules_text`; `load_spec()` is defined in `launch.py` itself (`.claude/bin/launch.py:188`).
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_brief_rules.py"`; `python3 -m unittest discover -s .claude/bin -p "test_quality_limits.py"`; `python3 -m unittest discover -s .claude/bin -p "test_launcher.py"`; `python3 .claude/bin/agentic.py quality`.
+  - `pinned(args)` takes the argument list: `cmd_pinned(args)` calls `pinned(args)`.
+  - Print the JSON with `ensure_ascii=False` and call `sys.exit(0)` at the end, as `callers` does.
+  - `load_manifest()` raises `ManifestError` when the block is missing: that is the "unexpected exception" path (error JSON, exit 0).
+  - Fragments come from the test's literal only; the source window is searched for the fragment as a plain substring.
+  - Known red before integration (not yours to fix; never touch `flow-budget.json`): the AC-001..004 tests of `test_pinned_conflict.py` and its `PIN_PATH` equality check (WP-02), and `test_lean` (the budget, WP-03). Any other red test is yours.
+- **WP validation note:** run `test_pinned.py` first; the full suite is only expected green after integration.
+- **Exact imports and APIs:** add `at_entity` to the existing `from core import (...)` block (`load_manifest`, `owns`, `source_files`, `ROOT` are already there); `re`, `json`, `sys` are already imported.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_pinned.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
-#### WP-02 · Both engines: bare writers' prompts and the acceptance repair
-- Wave 1. It consumes WP-01 by signature only: its scenarios never run `briefs`.
-- Files: `.claude/bin/pipeline.py`, `.claude/bin/pipeline_parts.py`, `.claude/workflows/agentic-implement.js`, `.claude/workflows/pipeline-spec.json`, `.claude/bin/conformance.json`, `.claude/bin/test_pipeline.py`, `.claude/bin/test_workflow.mjs`, `.claude/bin/test_qa_recheck.py`.
-- Implements section 6's engine contracts; the scenarios named in AC-003 to AC-006.
-- ACs: AC-003, AC-004, AC-005, AC-006, AC-007 (the spec's part).
-- **Patterns to mirror:**
-  - `.claude/workflows/agentic-implement.js:716-746`: open, test-author, close, then reopen.
-  - `.claude/workflows/agentic-implement.js:440-473`: `runWaves`.
-  - `.claude/bin/pipeline.py:480-512`: `run_waves`.
-  - `.claude/workflows/agentic-implement.js:507-520`: the budget arithmetic.
-  - `.claude/bin/test_pipeline.py:470-488`: the rules scenarios' assertions.
+#### WP-02 · Both engines route a pinned finding to pending
+- Wave 1.
+- Files: `.claude/bin/findings.py`, `.claude/bin/pipeline.py`, `.claude/workflows/agentic-implement.js`, `.claude/bin/conformance.json`, `.claude/bin/test_pipeline.py`, `.claude/bin/test_workflow.mjs`, `.claude/bin/test_pinned_findings.py`.
+- Implements C2 and C3; consumes C1 by signature (its output shape; the simulated worlds answer for it).
+- ACs: AC-001, AC-002, AC-003, AC-004.
+- **Patterns to mirror:** `.claude/bin/findings.py:168-190` (a helper and its constant); `.claude/workflows/agentic-implement.js:219-232` (the JS mirror); `.claude/workflows/agentic-implement.js:709-722` and `.claude/bin/pipeline.py:570-576` (the close you change); `.claude/bin/test_owner_split.py:1-30` (unit tests of helpers); `.claude/bin/test_pipeline.py:54-78` (the world's defaults).
 - **Gotchas:**
-  - First move `pipeline.py`'s module-level helpers (lines 25-160: `lines_json` to `rules_of`, with their constants) to `pipeline_parts.py`. Import them back by name in `pipeline.py`, so `pipeline.render`, `pipeline.gate_line` and the rest still resolve for `launch.py` and the tests. `rules_of` uses `text_sum`: `pipeline_parts.py` imports it from `findings` itself. Run the whole suite before adding anything.
-  - The workflow keeps its own copies of the spec's schemas, prompts and constants (`.claude/workflows/pipeline-spec.json:2`); `test_workflow.mjs` fails when they differ. Change both: `blocker.in` in `REPORT_SCHEMA`, and every prompt.
-  - Write the repair as one function in each engine (`repair_acceptance` / `repairAcceptance`), called from the `!good` branch. `runWaves` and `run_waves` must stay within 60 lines.
-  - `agentic-implement.js` can grow by 37 lines at most and add no line over 120 characters: split long template strings with `+`.
-  - The relaunched packages get the plain `implement` prompt; `contextGiven` / `context_given` still apply.
-  - A conformance scenario declares the repair through the existing `implementer`, `test_author` and `gate_fail` entries. `implementer` already takes a list of answers per call (`.claude/bin/test_pipeline.py:111-115`, `.claude/bin/test_workflow.mjs:76-80`). `test_author` takes one answer today (`.claude/bin/test_pipeline.py:103`, `.claude/bin/test_workflow.mjs:69`): give it a list form (one answer per call, the last repeated) in both harnesses the same way, for AC-005(d) (`DONE` in wave 0, then `BLOCKER`).
-  - `test_qa_recheck.py:128-130` asserts every `implementer` and `test-author` prompt contains `RULE-TEXT`: it now asserts none does, and keeps `standards-reviewer` and `qa`.
-  - Lines 64, 73 and 78 of `pipeline.py` are over 120 characters and move to `pipeline_parts.py`, a new file with no allowance: wrap them.
-  - `ConformanceTests`' keys (`.claude/bin/test_pipeline.py:221-223`) and both `summarize` functions gain `acceptance_repairs`.
-  - `test_workflow.mjs:317-330` asserts that every writer's prompt names the rule paths: it now asserts the opposite for `implementer` and `test-author`, and keeps the judges.
-- **Exact imports and APIs:** none new. `closeSeq`/`close_seq` and `seqRetry`/`seq_retry` exist.
-- **WP validation:** `node .claude/bin/test_workflow.mjs`; `python3 -m unittest discover -s .claude/bin -p "test_pipeline.py"`; `python3 -m unittest discover -s .claude/bin -p "test_launcher.py"`; `python3 .claude/bin/agentic.py quality`.
+  - The check runs in the close, after the verifiers: a pinned finding was confirmed first (a refuted one is never checked).
+  - In the re-review, `closeReview` receives the still-confirmed findings of every package (not only the fixed ones): any reflex one with a line is checked again. That is intended (a fix may have restored a pinned form).
+  - `run.review` already exists when `closeReview` runs, in both paths; overwrite `standards.confirmed` and `confirmed`, and set `standards.pinned` even when empty.
+  - The gate call is a lone command, not part of the close's `seq`: the close's `REVIEW=` mark depends on its answer.
+  - Existing scenarios with a reflex finding with a line (for example "a reflex finding blocks until it is fixed") now make one more gate call in both engines; they keep passing because the engines are compared with each other and the default answer pins nothing.
+  - `agentic-implement.js` may not gain a line over 120 characters (64 stored). Its line allowance is 920; keep the mirrors compact (one line per short helper, as `tierOf` and `inScope` are). If it still ends above 920, `.claude/quality-baseline.json`'s `lines` for that file is set by hand to the measured count in WP-02's commit, saying why; never any other entry, never `long_lines`.
+  - Known red before integration (not yours to fix; never touch `flow-budget.json`): every test of `test_pinned_conflict.py` except AC-001..004 and AC-003's `PIN_PATH` equality; `test_lean` (the budget, WP-03); and, without WP-01, `test_definitions.py`'s `test_workflow_calls_existing_commands` and `test_cited_commands_exist` (`pinned` is not a command yet). Any other red test is yours.
+  - New engine tests go in `test_pinned_findings.py` or `test_workflow.mjs`, not in `test_pipeline.py` (732 lines, limit 800).
+  - `test_pinned_findings.py` also reads `agentic-implement.js` as text and checks that its `PIN_PATH`, `PIN_MAX_ARGS` and `ACCEPTANCE_CONFLICT_DECISION` literals equal the Python ones.
+  - Python `bool` is an `int`: exclude it explicitly.
+  - JS `str(plan.root)` is the existing helper (`.claude/workflows/agentic-implement.js:193`).
+- **Exact imports and APIs:** in `pipeline.py`, extend `from findings import (...)` with `conflict_item, pinned_args, split_pinned`; `lines_json` (already imported from `pipeline_parts`) parses the answer; `self.seq([cmd], "pinned")`, `self.step(res, 0)`, `self.ok(st)`, `pending_key`. In the workflow: `seq`, `step`, `ok`, `lastJson`, `pendingKey`, `noRoot`, `str`.
+- **The JS item:** add a test to `test_workflow.mjs` that runs Annex A's first scenario and checks the `acceptance conflict` item's `pinned_by` and `decision` (the dump shows only pending types).
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_pinned_findings.py`; `node .claude/bin/test_workflow.mjs`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
-#### WP-03 · Definitions, docs, notes and release 2.22.0
-- Wave 2: it moves the previous acceptance file and raises the budget after the code.
-- Files: `docs/how-it-works.md`, `.claude/commands/implement.md`, `.claude/agents/implementer.md`, `.claude/agents/test-author.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_zone_stop_gate.py`, `.claude/bin/test_acceptance_v221.py`, `.claude/bin/test_failure_evidence.py`, `.claude/bin/test_fix_routing.py`, `.claude/bin/test_native_usage.py`.
-- ACs: AC-007 (the definitions' part), AC-008.
-- **Patterns to mirror:**
-  - `.claude/bin/upgrade.py:156-170`: the notes.
-  - `.claude/bin/test_native_usage.py:1-8`: the header of a file of moved tests.
-  - `.claude/agents/implementer.md:70`: the line on `blocker`.
-  - `.claude/commands/implement.md:71`: a presentation line.
-- **Gotchas:**
-  - Move the four classes of `test_acceptance_v221.py` with their helpers and constants to `test_zone_stop_gate.py`. Drop its `ReleaseTests`, and delete the file.
-  - In `test_failure_evidence.py`, remove line 225 (the plugin's version) and line 241 (it reads `test_acceptance_v221.py`). In `test_fix_routing.py`, remove line 264 (the version) and lines 271-272 (they read `test_acceptance_v221.py` and look for `"2.21.2"` in `test_failure_evidence.py`). Their notes and docs checks stay, `NOTES["2.21.2"]` included.
-  - `NOTES["2.22.0"]` goes right above `"2.21.2"`.
-  - `implementer.md:24` says "the rules printed in your prompt": it becomes "the rules at the end of your brief". `test-author.md` says the same where it names its brief.
-  - `test_native_usage.py:216-232` asserts the fallback's first implementer prompt holds the whole rules: it asserts them on `.claude/state/briefs/WP-01.md` of that project instead, and their absence from the prompt.
-  - `test_definitions.py:445` asserts `plugin.json`'s version is the newest note: raise both together.
-  - `flow-budget.json`: raise only what is exceeded, with its why.
-  - `.claude/flow-history.json` is regenerated by the maintainer as the last commit, not by this package.
-- **WP validation:** the five commands of section 3 and `python3 -m unittest discover -s acceptance`.
+#### WP-03 · Definitions, documentation and release 2.22.1
+- Wave 2 (it measures the code and prompts the other packages changed).
+- Files: `.claude/agents/test-author.md`, `.claude/agents/test-auditor.md`, `.claude/commands/implement.md`, `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v222.py`.
+- Depends on WP-01 and WP-02 by implementation (the budget counts their lines; the docs describe their behaviour).
+- ACs: AC-007, AC-008.
+- **Patterns to mirror:** `.claude/bin/upgrade.py:156-163` (a release's notes); `.claude/commands/implement.md:63-67` (pending bullets); `.claude/agents/test-auditor.md:20-36` (checklist and severity); `.claude/agents/test-author.md:17-25` (rules).
+- **What to write:**
+  - `test-author.md`, rule 2 gains: "Do not assert on the source text of production code when the behaviour can be observed through section 6. When a criterion can only be checked by reading the source, assert the smallest fragment it needs, and never pin a form that section 7 or the rules forbid (a bare literal where a named constant is required, for example): the implementer could not satisfy both." (The line must contain `source text` and `section 7`.)
+  - `test-auditor.md`, a new checklist item after **Wrong**: `   - **Pins the code's form:** a test that reads a production file as text and asserts a fragment of it. High when the fragment holds a form section 7 or the rules forbid (the fix the Standards reviewer would ask for breaks the test); medium when the behaviour could be observed through section 6 instead.` The severity section's first bullet gains: `, or a test that pins a form section 7 or the rules forbid`.
+  - `implement.md`, a pending bullet after **Concerns**: `  - **Acceptance conflicts** (items of type `acceptance conflict`): a Standards finding on a line whose text an acceptance test pins (`pinned_by`: the test, its line and the text). No fix was attempted: the person changes the test to check behaviour, or adds a waiver for that rule and file.` And the Review bullet for Standards adds `and the findings an acceptance test pins (`pinned`)`.
+  - `how-it-works.md`: a paragraph after the fix-cycle paragraph (line 155) explaining `agentic.py pinned`, the reflex-with-a-line candidates, the literal heuristic and its limits (no regex literals, no variables), the `acceptance conflict` item, and the two prevention rules. No version number.
+  - `plugin.json` → `2.22.1`; `upgrade.NOTES["2.22.1"]` before `"2.22.0"`, two notes (the detection with `acceptance conflict` and `agentic.py pinned`; the test-author and test-auditor rules), naming issue 145.
+  - `flow-budget.json`: re-measure with `python3 -c "import sys; sys.path.insert(0, '.claude/bin'); import test_lean; from pathlib import Path; print(test_lean.code_lines(Path('.')), test_lean.prompt_bytes(Path('.')))"`, and write the `why` for 2.22.1 (design 0033), with the measured deltas.
+  - `test_acceptance_v222.py:229`: `"2.22.0"` → `"2.22.1"`, nothing else.
+- **Gotchas:** `test_acceptance_v222.py` forbids any other test file from pinning `"2.22.0"` or `"2.21.2"` in a line with `version`. `test_lean.py` holds the budget to a two-sided 5 % band: measure after WP-01 and WP-02 are in.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 -m unittest discover -s acceptance`; `python3 -m unittest discover -s qa`; `python3 .claude/bin/agentic.py quality`.
 
 ```json wp-manifest
 {
   "maintainer": true,
   "stack": ["python", "typescript"],
   "allow_bash": ["Bash(python3 -m unittest:*)", "Bash(node .claude/bin/test_workflow.mjs)", "Bash(python3 .claude/bin/agentic.py quality)"],
-  "acceptance": {"files": [".claude/bin/test_acceptance_v222.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_acceptance_v222.py"},
+  "acceptance": {"files": [".claude/bin/test_pinned_conflict.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_pinned_conflict.py"},
   "verify": {"build": "python3 -m unittest discover -s bench -p \"test_*.py\"", "lint": "node .claude/bin/test_workflow.mjs", "types": "python3 -m unittest discover -s bench/acceptance", "tests": "python3 -m unittest discover -s .claude/bin -p \"test_*.py\""},
   "docs": {"files": ["docs/assets/"], "codemap": null},
   "work_packages": [
-    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/launch.py", ".claude/bin/test_brief_rules.py", ".claude/bin/test_quality_limits.py"],
-     "acs": ["AC-001", "AC-002"], "mirror": [".claude/bin/launch.py:268-277", ".claude/bin/launch.py:304-308", ".claude/bin/repo_scan.py:59-77", ".claude/bin/test_quality_limits.py:101-145"]},
-    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/pipeline.py", ".claude/bin/pipeline_parts.py", ".claude/workflows/agentic-implement.js", ".claude/workflows/pipeline-spec.json", ".claude/bin/conformance.json", ".claude/bin/test_pipeline.py", ".claude/bin/test_workflow.mjs", ".claude/bin/test_qa_recheck.py"],
-     "acs": ["AC-003", "AC-004", "AC-005", "AC-006", "AC-007"], "mirror": [".claude/workflows/agentic-implement.js:716-746", ".claude/workflows/agentic-implement.js:440-473", ".claude/bin/pipeline.py:480-512", ".claude/bin/test_pipeline.py:470-488"]},
-    {"id": "WP-03", "wave": 2, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", ".claude/commands/implement.md", ".claude/agents/implementer.md", ".claude/agents/test-author.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_zone_stop_gate.py", ".claude/bin/test_acceptance_v221.py", ".claude/bin/test_failure_evidence.py", ".claude/bin/test_fix_routing.py", ".claude/bin/test_native_usage.py"],
-     "acs": ["AC-007", "AC-008"], "mirror": [".claude/bin/upgrade.py:156-170", ".claude/bin/test_native_usage.py:1-8", ".claude/agents/implementer.md:70", ".claude/commands/implement.md:71"]}
+    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/repo_scan.py", ".claude/bin/agentic.py", ".claude/bin/launch.py", ".claude/bin/test_pinned.py", ".claude/bin/test_definitions.py"],
+     "acs": ["AC-005", "AC-006"], "mirror": [".claude/bin/repo_scan.py:270-283", ".claude/bin/repo_scan.py:178-186", ".claude/bin/agentic.py:315-316", ".claude/bin/agentic.py:427-439", ".claude/bin/test_agentic.py:906-916"]},
+    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/findings.py", ".claude/bin/pipeline.py", ".claude/workflows/agentic-implement.js", ".claude/bin/conformance.json", ".claude/bin/test_pipeline.py", ".claude/bin/test_workflow.mjs", ".claude/bin/test_pinned_findings.py"],
+     "acs": ["AC-001", "AC-002", "AC-003", "AC-004"], "mirror": [".claude/bin/findings.py:168-190", ".claude/workflows/agentic-implement.js:219-232", ".claude/workflows/agentic-implement.js:709-722", ".claude/bin/pipeline.py:570-576", ".claude/bin/test_owner_split.py:1-30", ".claude/bin/test_pipeline.py:54-78"]},
+    {"id": "WP-03", "wave": 2, "depends_on": ["WP-01", "WP-02"], "files": [".claude/agents/test-author.md", ".claude/agents/test-auditor.md", ".claude/commands/implement.md", "docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
+     "acs": ["AC-007", "AC-008"], "mirror": [".claude/bin/upgrade.py:156-163", ".claude/commands/implement.md:63-67", ".claude/agents/test-auditor.md:20-36", ".claude/agents/test-author.md:17-25"]}
   ]
 }
 ```
 
 ## 9. Test strategy
 
-- **Acceptance** (`test_acceptance_v222.py`, written first and red):
-  - AC-001 and AC-002 run `agentic.py briefs` in temporary repos.
-  - AC-003 to AC-006 run the named conformance scenarios through `test_pipeline.run_scenario` and compare them with `test_workflow.mjs --dump` (skipped without `node`).
-  - AC-007 and AC-008 read files.
-  - Nothing is spent.
-- **Unit:**
-  - `test_brief_rules.py` covers `brief_rules`: with no rules installed it returns only the limits sentence (or `""` without a baseline); no quality baseline gives no limits sentence; frontmatter is stripped.
-  - `test_pipeline.py`'s `EngineTests` covers `acceptance_blocked`: a missing report; `DONE_WITH_CONCERNS`; `NEEDS_CONTEXT`; a `BLOCKED` without `in`.
-- **Teeth:** each behaviour is broken once by hand and an acceptance test must fail:
-  - the rules left out of `AT.md`;
-  - a writer's prompt with the rules again;
-  - the repair relaunching the whole wave;
-  - a second repair allowed;
-  - the ownership check skipped;
-  - one engine skipping the repair.
-- **By hand, before the pull request:** the installed-project job, and `agentic.py flow-history` as the last commit with its `--check`.
+- **Unit:** WP-01 in `test_pinned.py` (`pin_fragments`, `find_pins` and the command through `Repo`); WP-02 in `test_pinned_findings.py` (`pin_path`, `pinned_args`, `split_pinned`, `conflict_item`). The JS mirrors are held equal by the conformance scenarios (`test_pipeline.ConformanceTests`).
+- **Acceptance (AT, wave 0):** `.claude/bin/test_pinned_conflict.py`, written before the code, red until WP-01 and WP-02 exist. Engine criteria use the scenario names of Annex A with `test_pipeline.run_scenario` and `node .claude/bin/test_workflow.mjs --dump` (skip the native half without `node`, as `test_acceptance_v222.EngineCase` does); the full fallback result (for `pending` items and `review`) comes from `test_pipeline.world(decl)` and `pipeline.Pipeline(test_pipeline.SPEC, gate, agent, parallel=lambda thunks: [t() for t in thunks]).execute()`. A missing scenario raises an `AssertionError` that names it (red for the right reason). AC-008 is skipped outside the flow repo (`core.is_flow_repo`). The AT must not pin `"2.22.0"` or `"2.21.2"` in a line with `version`.
+- **QA:** exploratory: a temporary repo with a Python test pinning `"MAX = 3"` style text and a PowerShell one, the command run by hand; the gate's `seq pinned ...` form; a finding with an absolute Windows path and a root of another case.
+- Everything runs with the commands of section 3. Executed by hand, as every design that touches `.claude/` (design 0016).
 
 ## 10. Decisions
 
 | Decision | Discarded | Why |
 |---|---|---|
-| The writers get the rules in their brief | Make the gatekeeper's relay reliable (a separate call, a retry) | Chosen with the user. The brief is written by Python from disk, and reading it is the writer's first step. A retry still depends on a Haiku agent copying 8.5 KB exactly, which the field data shows failing 4 times in 5 (`rules: "pointed"`) |
-| The judges keep today's path | Give them a rules file too | Chosen with the user: the field bug was a writer's. Section 11 records the risk |
-| The rules leave the writers' prompts | Print them in both places | Twice the tokens on every writer call, and two sources that can differ |
-| The test-auditor reads the rules too (they are in `AT.md`) | A separate rules file for the test-author | A second file is a second read the agent may skip, which is what failed. About 8.5 KB more for the auditor, not measured in tokens |
-| Brief rules are the full text, even in a native run | The native pointer for the always-loaded files | The brief is on disk; no relay limits its size |
-| The package declares `blocker.in: "acceptance"` | The flow infers it from the acceptance output | Chosen with the user: deterministic. Inferring it is the report's proposal 2, excluded |
-| Only the blocked packages are relaunched, once per run | The whole wave; once per wave | Chosen with the user: fewer calls; a second block in the same run is a sign for a person |
-| No repair in a fix wave, and never after writes outside ownership | Repair every wave | A fix wave has its own cap and history. A new snapshot after an ownership violation would accept the stray writes |
-| No `--expect red` on the repair's close | The wave 0 close | The code exists by then: the tests may pass |
-| `pipeline.py`'s helpers move to `pipeline_parts.py` | Raise the file's allowance | It is at the 800-line limit; the helpers are pure functions with no state of the class |
-| A minor release, 2.22.0, with its own acceptance file, and the 2.21.x tests in named files | A fix release | It adds a behaviour to both engines |
-| Implementation: `agentic-implement.js`'s allowance in `.claude/quality-baseline.json` raised from 831 to 890 lines (long lines stay at 64) | Compact older code of the engine; drop the repair | Section 7 asked to stay within 861, but the repair needs about 45 lines and no line could grow past 120 characters. Chosen by the user during the implementation, as for 2.20.0 |
-| Implementation: three tests the plan did not list were updated (`test_launcher.py:229`, `test_definitions.py:645-647`, `test_qa_recheck.py:172`), and `installer.py` ships `pipeline_parts.py` | Leave them red | They pinned the rules in the writers' prompts and the old wording of the agents' definitions; `test_install.py` requires every module in `INSTALL_BIN` |
+| The conflict is a blocking pending item (`acceptance conflict`, tier reflex) | Non-blocking item; an automatic waiver | User's choice. A waiver needs who decided (`validate` demands it); an acceptance test that pins form may itself be wrong. |
+| Deterministic detection by a command | The implementer declares a conflict in its fix report; the Standards reviewer marks `pinned_by` | User's choice. Neither depends on an agent following a new instruction; the implementer route still spends the cycle the issue complains about. |
+| Prevention in the test-author and a narrow auditor finding | Auditor blocks every source-text assertion; no prevention | User's choice. A blanket rule would stop wave 0 for legitimate static checks ("does not call Invoke-Expression") after one revision. |
+| Only Standards reflex findings with a line | Spec and floor findings too | A pin never excuses a correctness or security defect; reflex is the tier a waiver could cover. |
+| One check point, the review's close | Before the verifiers (saves a verifier call) | One insertion point per engine covers the full review and the re-review alike; the verifier call is the price. |
+| Fragment must hold one of `()[]{}=;` and 8+ characters; window ±1 line | Any literal; exact line only; ±2 | Messages and names in tests (`'Get-Item -Path'`, `"file not found"`) would otherwise pin lines their tests only observe; a reviewer's line can be one off. The thresholds are not measured. |
+| Only a test file that reads a file as text (`PIN_READ_RE`) and names the finding's file can pin it | Any acceptance file; also requiring the fragment to share a token with the finding's text | User's choice, to cut false positives: a behavioural test whose message or call happens to match the line never reads the source. The token rule was discarded: a function-length finding names the function its pinned signature holds. The residual case (a static test pinning a part of the line the fix would not touch) goes to a person; the alternative, one fix attempt before routing, was declined as too much machinery for a rare case. |
+| Paths matching `PIN_PATH` only | Quoting arguments | The fallback splits with `shlex` and the workflow's gatekeeper copies the command; a path with spaces would break both. Such findings behave as today. |
+| A fail-open step (no answer → nothing pinned) | Stop the run | It is an instrument, like `callers`: it never makes a run worse than today. |
+| Version 2.22.1 | 2.23.0 | A fix release, as 2.21.1 and 2.21.2 were, although it adds a command (as 2.21.2 added `validate` checks). |
+| AT in a named file `test_pinned_conflict.py`, with no exact version pin | A `test_acceptance_v2221.py` | `test_acceptance_v222.py` requires it to be the only `test_acceptance*` file; patch releases add named files (design 0031). |
+| Reuse `source_files`, `at_entity`, `owns`, `_without_root`, `pendingKey` | New scanners | Already tested. |
 
 ## 11. Risks and open questions
 
-- **The judges can still get only the paths.** The standards reviewer and QA keep the relayed text, and it failed 4 times in 5 in the field. A standards finding that cites a rule may be missing. Not measured how often it changes a verdict.
-- **Not measured: why two of the field runs carried not even the paths.** The record of those runs was overwritten. A plan with an empty `rules` list gives `rules: "none"`; that path is unchanged.
-- **A package may claim `in: "acceptance"` wrongly.** The test-author then sees the blockers, and may answer `BLOCKER` or change nothing. In the second case the relaunched package blocks again and the run stops, as today. The test-author must not weaken a criterion; there is no second audit, so that rests on its definition and on the reviewers later.
-- **Field validation:** the next PowerShell run should show `rules` in `AT.md` and the repair in `acceptance_repairs`; reported by the user.
+- **False positives**: only a test that reads the finding's file as text can pin it, so behavioural tests never do. What remains is a static test that pins a part of the line the fix would not change (a pinned signature, a function-length finding): that finding goes to a person instead of a fix. Not measured.
+- **False negatives** (regex literals, concatenations, variables, multi-line pins): the run behaves as today. Not measured.
+- **The first wasted cycle of the field run** (the wave writes the form the rules ask for, the pin fails verification) is only addressed by the prompts of WP-03; prompt changes are not measured here (no bench scenario).
+- **Criteria that pin code text come from the plan.** If `/architect` writes "the source contains `ShowBalloonTip(10000`", the test-author now has a contradiction to report as `BLOCKER`. A sentence in `/architect` and the plan-reviewer is a follow-up, not in this release.
+- **The workflow's line allowance**: WP-02 may need a hand raise of `agentic-implement.js`'s stored lines (the ratchet's baseline is owned by no package). It is the same step 2.22.0 took.
+- **The field result's version** is inferred from its shape (issue 145), not stated.
 
-No question blocks a WP.
+## Annex A · Conformance scenarios
+
+WP-02 adds these four scenarios to `.claude/bin/conformance.json` (`scenarios`, at the end), exactly. The AT refers to them by name. Every other key takes the defaults of `conformance.json`'s `plan` and of the simulated worlds; the default re-review answer is ADDRESSED.
+
+```json
+[
+  {
+    "name": "a reflex finding pinned by an acceptance test goes to pending",
+    "plan": {"root": "/repo"},
+    "standards": [
+      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+        {"wp": "WP-02", "file": "/repo/src/b/x.py", "line": 3, "problem": "PINNED-PROBLEM", "evidence": "x = limit(10000)",
+         "fix": "a named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]}
+    ],
+    "gate_fail": [
+      {"prefix": "pinned", "exit_code": 0, "output": {"pinned": [
+        {"file": "src/b/x.py", "line": 3, "test": "acceptance/test_x.py", "test_line": 12, "text": "limit(10000"}], "skipped": []}}
+    ]
+  },
+  {
+    "name": "a pinned step that cannot answer leaves the finding to be fixed",
+    "standards": [
+      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+        {"wp": "WP-02", "file": "src/b/x.py", "line": 3, "problem": "PINNED-PROBLEM", "evidence": "x = limit(10000)",
+         "fix": "a named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]},
+      {"status": "PASS", "axis": "standards", "findings": [], "not_checked": []}
+    ],
+    "gate_fail": [{"prefix": "pinned", "exit_code": 1, "output": "boom"}]
+  },
+  {
+    "name": "only reflex findings with a line are checked for pins",
+    "standards": [
+      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+        {"wp": "WP-02", "file": "src/b/x.py", "line": 3, "problem": "FINISH-NOTE", "evidence": "e", "fix": "f",
+         "if_skipped": "s", "provenance": "read", "tier": "finish", "rule": "No magic numbers"},
+        {"wp": "WP-02", "file": "src/b/y.py", "problem": "NO-LINE", "evidence": "e", "fix": "f", "if_skipped": "s",
+         "provenance": "read", "tier": "reflex", "rule": "No magic numbers"},
+        {"wp": "WP-02", "file": "src/b/a b.py", "line": 3, "problem": "SPACED-PATH", "evidence": "e", "fix": "f",
+         "if_skipped": "s", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]},
+      {"status": "PASS", "axis": "standards", "findings": [], "not_checked": []}
+    ]
+  },
+  {
+    "name": "a pinned finding is not re-reviewed and stays pending",
+    "standards": [
+      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+        {"wp": "WP-02", "file": "src/b/x.py", "line": 3, "problem": "PINNED-PROBLEM", "evidence": "x = limit(10000)",
+         "fix": "a named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"},
+        {"wp": "WP-02", "file": "src/b/x.py", "line": 9, "problem": "FIXED-PROBLEM", "evidence": "y = 255",
+         "fix": "a named constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]}
+    ],
+    "gate_fail": [
+      {"prefix": "pinned", "exit_code": 0, "output": {"pinned": [
+        {"file": "src/b/x.py", "line": 3, "test": "acceptance/test_x.py", "test_line": 12, "text": "limit(10000"}], "skipped": []}}
+    ]
+  }
+]
+```
+
+What each one must produce, in both engines:
+
+| Scenario | `pinned` gates | `fix_cycles` | `result` | `pending` types |
+|---|---|---|---|---|
+| a reflex finding pinned by an acceptance test goes to pending | `pinned src/b/x.py:3` | 0 | REVIEW | `acceptance conflict` |
+| a pinned step that cannot answer leaves the finding to be fixed | `pinned src/b/x.py:3` | 1 | OK | none |
+| only reflex findings with a line are checked for pins | none | 1 | OK | none |
+| a pinned finding is not re-reviewed and stays pending | `pinned src/b/x.py:3 src/b/x.py:9` | 1 | REVIEW | `acceptance conflict` |
+
+In the third, the finish note never blocks, and the two reflex findings (no line; a path with a space) are fixed and re-reviewed as today.
