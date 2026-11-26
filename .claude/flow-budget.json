@@ -1,5 +1,5 @@
 {
-  "code_lines": 8207,
+  "code_lines": 8350,
   "prompt_bytes": 104035,
-  "why": "2.22.1 (design 0033, issue 145): +246 code lines for `agentic.py pinned` and the pin helpers in both engines, with their tests (+47 lines in agentic-implement.js); +1116 prompt bytes for the test-author's and test-auditor's rules and /implement's acceptance conflict line"
+  "why": "2.22.2 (design 0034): +143 code lines for the worktree root in hook.py (linked_worktree, the session's remembered root) and core.project_root, with their unit and acceptance tests; prompt bytes unchanged"
 }
