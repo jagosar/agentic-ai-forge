@@ -13,7 +13,7 @@ After this fix, `split_by_owner` reads `file` as a list of paths (split on `,` a
 
 - `findings.split_by_owner`: `file` normalised into paths; the `wp` corrected to the owner of the file when it owns none of its paths; parts for every other package that owns a path of `file` or one named in the evidence or fix; `scope` always a list of single paths.
 - The workflow's mirror `splitByOwner` in `agentic-implement.js`, the same rules.
-- Two conformance scenarios: a pinned finding with a wrong `wp`, and a multi-path `file`.
+- Three conformance scenarios (Annex A).
 - Release 2.22.3.
 
 ### Excluded (non-goals)
@@ -37,15 +37,15 @@ Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workfl
 ```
 .claude/bin/findings.py                  WP-01  split_by_owner, _paths, _owner_of, PATH_SEPARATORS
 .claude/bin/test_owner_wp.py             WP-01  new: unit cases
-.claude/workflows/agentic-implement.js   WP-02  splitByOwner and its helpers, the same rules
-.claude/bin/conformance.json             WP-02  two scenarios (Annex A)
-docs/how-it-works.md                     WP-03  the split paragraph
-.claude-plugin/plugin.json               WP-03  2.22.3
-.claude/bin/upgrade.py                   WP-03  NOTES["2.22.3"]
-.claude/flow-budget.json                 WP-03
-.claude/bin/test_acceptance_v222.py      WP-03  its version pin (line 229): 2.22.3
+.claude/workflows/agentic-implement.js   WP-01  splitByOwner and its helpers, the same rules
+.claude/bin/conformance.json             WP-01  three scenarios (Annex A)
+docs/how-it-works.md                     WP-02  the split paragraph
+.claude-plugin/plugin.json               WP-02  2.22.3
+.claude/bin/upgrade.py                   WP-02  NOTES["2.22.3"]
+.claude/flow-budget.json                 WP-02
+.claude/bin/test_acceptance_v222.py      WP-02  its version pin (line 229): 2.22.3
 .claude/bin/test_owner_split_v2.py       AT
-.claude/flow-history.json                by hand: regenerated as the last commit
+.claude/flow-history.json                by hand (the person executing the plan): regenerated as the last commit
 ```
 
 ## 4b. Existing code context
@@ -65,7 +65,7 @@ docs/how-it-works.md                     WP-03  the split paragraph
 | Release notes: newest first, `2.22.2` at the top of the recent block | `.claude/bin/upgrade.py:156-164` | `2.22.3` right before `2.22.2` | read |
 | `test_acceptance_v222.py` pins the plugin version | `.claude/bin/test_acceptance_v222.py:226-229` | `"2.22.2"` → `"2.22.3"` | read |
 
-What must NOT change: a finding whose `wp` owns its `file` and whose evidence names no other package is returned as the same object; the fingerprint of the original; the parts' fields and order.
+What must NOT change: a finding whose `wp` owns its `file` and whose evidence names no other package is returned as the same object; a finding that is split only because its evidence names other packages keeps its `file` exactly as the reviewer wrote it (root and backslashes included) and its `line`, as today; the fingerprint of the original; the parts' fields and order.
 
 ## 5. Data model
 
@@ -82,11 +82,11 @@ A finding after the split may carry `"wp_from": "<the reviewer's wp>"` when its 
 For each finding `f` that is a dict (anything else passes through unchanged, in place):
 
 1. `paths`: `_without_root(f["file"], root)` when `file` is a string, split with `PATH_SEPARATORS`, empty pieces dropped, repeats dropped, order kept. `[]` when `file` is not a string.
-2. `_owner_of(path, owners)`: the first package id in ascending order whose files contain the path, compared ASCII-lowercased: equal to a file, or under a file ending in `/`. `None` when no package owns it.
+2. `_owner_of(path, owners)`: the first package id in ascending order whose files contain the path, compared ASCII-lowercased: equal to a file, or under a file ending in `/`. `None` when no package owns it. Owner values that are not lists are skipped (`test_owner_split.py:62` passes `{"WP-02": "src/b/"}`).
 3. `wp`: `f["wp"]` when it is a string, else `None`. When at least one path has an owner and `wp` owns none of the paths, `new_wp` is the owner of the first owned path (in `paths` order) and the finding is **corrected**; otherwise `new_wp = wp`.
 4. `others`: for each package `o != new_wp` in ascending id order, the paths of `paths` it owns plus the files of `o` that `_named` finds in the evidence and fix (today's rule). Packages with none are left out.
 5. When the finding is not corrected, `others` is empty and `len(paths) <= 1`: append `f` itself and continue (same object).
-6. The original: `{**f, "wp": new_wp, "file": <first path of paths owned by new_wp, else paths[0], else f["file"]>, "scope": sorted(set(<paths owned by new_wp> + <unowned paths> + <new_wp's files named in the evidence>))}`. When corrected, add `"wp_from": wp`. `line` is kept only when the new `file` equals `paths[0]` (when `paths` is empty, it is kept as it is); otherwise removed.
+6. The original: `{**f, "wp": new_wp, "scope": sorted(set(<paths owned by new_wp> + <unowned paths> + <new_wp's files named in the evidence>))}`. Its `file` and `line`: when the finding is not corrected and `len(paths) <= 1`, both stay exactly as the reviewer wrote them (today's behaviour). Otherwise `file` becomes the first path of `paths` owned by `new_wp`, else `paths[0]`; `line` is kept only when that new `file` equals `paths[0]`, and removed otherwise. When corrected, add `"wp_from": wp`.
 7. Parts, as today: for each `o` in `others`, `{**f, "wp": o, "file": scope[0], "scope": scope, "split_from": f["fingerprint"]}` with `scope = sorted(set(files))` (the owner's spelling for named files, the finding's spelling for paths of `file`), no `line`, `wp_from` removed, and a fresh fingerprint (suffixed `-2`, `-3` ... when taken).
 8. Never raises on odd shapes (non-string fields, owners not a dict, a file list).
 
@@ -120,24 +120,24 @@ The same rules, reading `plan.owners` and `plan.root` as today. Helpers mirrored
   - Expected: the gates contain `pinned src/c.py:3` once; `fix_cycles` 0; `result` `REVIEW`; `pending` types `["acceptance conflict"]`, and that item's `wp` is `WP-03`; `review.standards.confirmed` is `[]`. Both engines agree on result, fix_cycles, pending, gates, gate_calls, agents and prompts.
   - Must not: an implementer call labelled `(fix)`; a confirmed finding on `WP-03`.
   - Check: `test_owner_split_v2.py`, AC-002 tests.
-  - WP: WP-02
+  - WP: WP-01
 - AC-003 · A `file` with several paths is split by owner, `scope` always a list (case 2)
   - Scenario: `owners = {"WP-01": ["src/a.py"], "WP-02": ["src/b/"], "WP-03": ["src/c.py"]}`; a finding of `wp` `WP-01`, `line` 7, `file` `"src/c.py, src/b/x.py; acceptance/t.py"`, evidence `"e"`, fix `"f"`.
   - Action: `findings.split_by_owner([f], owners, "")`, and the Annex A scenario "a finding whose file lists several paths is split by owner" in both engines.
   - Expected (unit): two findings. The original: `wp` `WP-03`, `wp_from` `WP-01`, `file` `src/c.py`, `line` 7, `scope` `["acceptance/t.py", "src/c.py"]`. The part: `wp` `WP-02`, `file` `src/b/x.py`, `scope` `["src/b/x.py"]`, `split_from` the original's fingerprint, no `line`, no `wp_from`. (Engines): one fix cycle with fix calls for `WP-02` and `WP-03` and none for `WP-01`; both engines agree as in AC-002.
   - Must not: any `scope` entry containing `,` or `;`; a finding left on `WP-01`.
   - Check: `test_owner_split_v2.py`, AC-003 tests.
-  - WP: WP-01 (unit), WP-02 (engines)
+  - WP: WP-01
 - AC-004 · A part on another file is fixed even when the original's line is pinned
   - Scenario: Annex A scenario "a part on another file is fixed although the original is pinned".
   - Action: both engines.
   - Expected: `pinned src/a.py:3` once; `pending` types `["acceptance conflict"]` with `wp` `WP-01`; one fix cycle with a `WP-03 (fix)` call and no `WP-01 (fix)` call; both engines agree.
   - Must not: the `WP-03` part in pending.
   - Check: `test_owner_split_v2.py`, AC-004 tests.
-  - WP: WP-02
+  - WP: WP-01
 - AC-005 · What owned its file before is unchanged
   - Scenario: `owners` of AC-003.
-  - Action: `split_by_owner` on (a) a finding of `WP-01` on `src/a.py` whose evidence names no other file; (b) `WP-01` on `/abs/x.py` (no owner); (c) `WP-99` with `file` `None` and evidence `src/c.py`; (d) `file` `["src/c.py"]` (not a string).
+  - Action: `split_by_owner` on (a) a finding of `WP-01` on `src/a.py` with evidence `"e"`; (b) `WP-01` on `/abs/x.py` (no owner), evidence `"e"`; (c) `WP-99` with `file` `None` and evidence `src/c.py`; (d) `WP-01` with `file` `["src/c.py"]` (not a string), evidence `"e"`.
   - Expected: (a), (b) and (d) are returned as the same objects; (c) gives `[("WP-99", []), ("WP-03", ["src/c.py"])]` as `(wp, scope)` pairs, as today.
   - Must not: `wp_from` on any of them.
   - Check: `test_owner_split_v2.py`, AC-005 test.
@@ -148,37 +148,33 @@ The same rules, reading `plan.owners` and `plan.root` as today. Helpers mirrored
   - Expected: `plugin.json`'s version as a tuple ≥ `(2, 22, 3)`; `upgrade.NOTES["2.22.3"]` comes right before `"2.22.2"` and some note contains `wp_from`; `docs/how-it-works.md` contains `wp_from` and not `2.22.3`; `quality` exits 0.
   - Must not: a line of `test_acceptance_v222.py` with both `plugin[` and `"2.22.2"`.
   - Check: `test_owner_split_v2.py`, AC-006 test (flow repo only).
-  - WP: WP-03
+  - WP: WP-02
 
 ### Work packages
 
-#### WP-01 · `split_by_owner` reads every path of `file` and follows its owner
+#### WP-01 · Both engines give a finding to the package that owns its file, path by path
 - Wave 1.
-- Files: `.claude/bin/findings.py`, `.claude/bin/test_owner_wp.py`.
-- Implements C1.
-- ACs: AC-001, AC-003 (unit), AC-005.
-- **Patterns to mirror:** `.claude/bin/findings.py:136-167` (the function you change); `.claude/bin/test_owner_split.py:1-30` (unit tests).
+- Files: `.claude/bin/findings.py`, `.claude/bin/test_owner_wp.py`, `.claude/workflows/agentic-implement.js`, `.claude/bin/conformance.json`.
+- Implements C1 and C2.
+- ACs: AC-001, AC-002, AC-003, AC-004, AC-005.
+- **Patterns to mirror:** `.claude/bin/findings.py:136-167` (the function you change); `.claude/bin/test_owner_split.py:1-30` (unit tests); `.claude/workflows/agentic-implement.js:179-218` (the mirror); `.claude/bin/conformance.json:1924-1966` (a split scenario).
 - **Gotchas:**
+  - Both engines in one package: `test_pipeline.ConformanceTests` (`.claude/bin/test_pipeline.py:212-231`) runs the JS engine and the Python engine and compares their prompts, so neither engine can change alone.
   - The ownership test is per path: `src/b/` owns `src/b/x.py`, not `src/bb/x.py`; compare ASCII-lowercased, keep the original spelling.
   - The original's fingerprint is never recomputed; only parts get a fresh one.
   - Keep the same-object return for unchanged findings: `test_owner_split.py:66-69` pins it.
   - A function over 60 lines fails `quality`: move the path and owner helpers out.
+  - The workflow has 30 lines of headroom (937 stored): reuse `noRoot`, `named`, `lowAscii` and `str`, keep the mirror compact, and add no line over 120 characters.
+  - JS `sort()` on strings sorts by UTF-16 code units, Python's `sorted` by code points: equal for the ASCII paths the scenarios use.
+  - Add the Annex A scenarios exactly, at the end of `scenarios`; `json.dumps(indent=2)` reproduces the file.
+  - Known red until WP-02: `test_lean` (the budget) and AC-006.
 - **Exact imports and APIs:** `re` (already imported), `_without_root`, `_named`, `fingerprint`.
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_owner*.py"`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_owner*.py"`; `node .claude/bin/test_workflow.mjs`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
-#### WP-02 · The workflow mirrors it, with conformance scenarios
-- Wave 1.
-- Files: `.claude/workflows/agentic-implement.js`, `.claude/bin/conformance.json`.
-- Implements C2; consumes C1 by signature (the conformance comparison runs both).
-- ACs: AC-002, AC-003 (engines), AC-004.
-- **Patterns to mirror:** `.claude/workflows/agentic-implement.js:179-218`; `.claude/bin/conformance.json:1924-1966`.
-- **Gotchas:** JS `sort()` on strings sorts by UTF-16 code units, Python's `sorted` by code points: equal for the ASCII paths the scenarios use. No line over 120 characters. Add the Annex A scenarios exactly, at the end of `scenarios`; `json.dumps(indent=2)` reproduces the file.
-- **WP validation:** `node .claude/bin/test_workflow.mjs`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
-
-#### WP-03 · Documentation and release 2.22.3
-- Wave 2 (it measures the budget after WP-01 and WP-02).
+#### WP-02 · Documentation and release 2.22.3
+- Wave 2 (it measures the budget after WP-01).
 - Files: `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v222.py`.
-- Depends on WP-01 and WP-02 by implementation.
+- Depends on WP-01 by implementation.
 - ACs: AC-006.
 - **Patterns to mirror:** `.claude/bin/upgrade.py:156-164`.
 - **What to write:** in `how-it-works.md`, after the sentence on splitting a confirmed finding, one sentence: the finding's `file` is read path by path, and a finding whose `wp` owns none of its paths goes to the owner of the first one, recording the reviewer's `wp` in `wp_from`. One note in `NOTES["2.22.3"]` naming issue 149 and `wp_from`. The budget, measured with `test_lean.code_lines(Path('.'))` and `test_lean.prompt_bytes(Path('.'))`, with a `why`.
@@ -193,11 +189,9 @@ The same rules, reading `plan.owners` and `plan.root` as today. Helpers mirrored
   "verify": {"build": "python3 -m unittest discover -s bench -p \"test_*.py\"", "lint": "node .claude/bin/test_workflow.mjs", "types": "python3 -m unittest discover -s bench/acceptance", "tests": "python3 -m unittest discover -s .claude/bin -p \"test_*.py\""},
   "docs": {"files": ["docs/assets/"], "codemap": null},
   "work_packages": [
-    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/findings.py", ".claude/bin/test_owner_wp.py"],
-     "acs": ["AC-001", "AC-003", "AC-005"], "mirror": [".claude/bin/findings.py:136-167", ".claude/bin/test_owner_split.py:1-30"]},
-    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/workflows/agentic-implement.js", ".claude/bin/conformance.json"],
-     "acs": ["AC-002", "AC-003", "AC-004"], "mirror": [".claude/workflows/agentic-implement.js:179-218", ".claude/bin/conformance.json:1924-1966"]},
-    {"id": "WP-03", "wave": 2, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
+    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/findings.py", ".claude/bin/test_owner_wp.py", ".claude/workflows/agentic-implement.js", ".claude/bin/conformance.json"],
+     "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-005"], "mirror": [".claude/bin/findings.py:136-167", ".claude/bin/test_owner_split.py:1-30", ".claude/workflows/agentic-implement.js:179-218", ".claude/bin/conformance.json:1924-1966"]},
+    {"id": "WP-02", "wave": 2, "depends_on": ["WP-01"], "files": ["docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
      "acs": ["AC-006"], "mirror": [".claude/bin/upgrade.py:156-164"]}
   ]
 }
@@ -219,7 +213,9 @@ The same rules, reading `plan.owners` and `plan.root` as today. Helpers mirrored
 | `,` and `;` separate paths | Any whitespace | Paths with spaces exist; reviewers join with commas. |
 | Unowned paths stay in the original's `scope` | Drop them | The re-review must still judge the finding in every file it names. |
 | No change to `split_pinned` or the engines' call sites | A pin per `split_from` group | The corrected original carries the line. |
-| Two WPs in one wave | JS after Python | The JS programs against C1; conformance compares the engines after both. |
+| Both engines in one package, then the release | One package per engine | The conformance test compares the engines' prompts: one engine alone fails it (precedent: design 0033). |
+| A finding not corrected whose `wp` owns only a later path of a multi-path `file` loses its `line` (its `file` becomes that path) | Keep the line | The line belongs to the first path the reviewer wrote; on another file it would be wrong, and a wrong line could pin the wrong text. |
+| `file` rewritten only for a corrected or multi-path finding | Always normalise it | A finding split only by its evidence keeps today's `file`, so its fix prompt and its pin are unchanged. |
 | Version 2.22.3 | 2.23.0 | A fix. |
 
 ## 11. Risks and open questions
@@ -229,7 +225,7 @@ The same rules, reading `plan.owners` and `plan.root` as today. Helpers mirrored
 
 ## Annex A · Conformance scenarios
 
-WP-02 adds these to `.claude/bin/conformance.json`, at the end of `scenarios`, exactly.
+WP-01 adds these to `.claude/bin/conformance.json`, at the end of `scenarios`, exactly.
 
 ```json
 [
