@@ -191,6 +191,15 @@ const pathRe = f => new RegExp('(?<![A-Za-z0-9_./-])' + lowAscii(f).replace(/[.*
   (f.endsWith('/') ? '' : '(?![A-Za-z0-9_-])'))
 const named = (files, low) => files.filter(f => typeof f === 'string' && f && pathRe(f).test(low))
 const str = v => (typeof v === 'string' ? v : '')
+// findings.py's _paths and _owner_of: `file` read path by path, each path's owner by ASCII-folded prefix.
+const PATH_SEPARATORS = /\s*[,;]\s*/
+const pathsOf = (file, root) => typeof file !== 'string' ? []
+  : [...new Set(noRoot(file, root).split(PATH_SEPARATORS).filter(Boolean))]
+const ownerOf = (path, owners) => Object.keys(owners).sort().find(o => Array.isArray(owners[o]) &&
+  owners[o].some(f => typeof f === 'string' && f && (lowAscii(path) === lowAscii(f) ||
+    (f.endsWith('/') && lowAscii(path).startsWith(lowAscii(f)))))) || null
+// findings.py's split_by_owner: the finding goes to the owner of its file (wp_from keeps the reviewer's wp), and each
+// other package owning a path of `file` or named in the evidence or fix gets a part, in id order.
 const splitByOwner = findings => {
   const owners = plan.owners && typeof plan.owners === 'object' && !Array.isArray(plan.owners) ? plan.owners : {}
   const root = str(plan.root)
@@ -198,16 +207,33 @@ const splitByOwner = findings => {
   return findings.flatMap(f => {
     if (!f || typeof f !== 'object') return [f]
     const wp = typeof f.wp === 'string' ? f.wp : null
+    const paths = pathsOf(f.file, root)
+    const byOwner = {}
+    const unowned = []
+    for (const p of paths) {
+      const o = ownerOf(p, owners)
+      if (o) (byOwner[o] = byOwner[o] || []).push(p)
+      else unowned.push(p)
+    }
+    const ownedBy = Object.keys(byOwner)
+    const newWp = ownedBy.length && !ownedBy.includes(wp) ? ownedBy[0] : wp  // the owner of the first owned path
     const low = lowAscii(noRoot(str(f.evidence) + '\n' + str(f.fix), root))
-    const others = Object.keys(owners).sort().filter(o => o !== wp && Array.isArray(owners[o]))
-      .map(o => [o, named(owners[o], low)]).filter(([, files]) => files.length)
-    if (!others.length) return [f]
-    const own = noRoot(str(f.file), root)
-    const mine = wp !== null && Array.isArray(owners[wp]) ? named(owners[wp], low) : []
-    return [{ ...f, scope: [...new Set([...(own ? [own] : []), ...mine])].sort() }, ...others.map(([o, files]) => {
-      const scope = [...new Set(files)].sort()
+    const others = Object.keys(owners).sort().filter(o => o !== newWp && Array.isArray(owners[o]))
+      .map(o => [o, [...new Set([...(byOwner[o] || []), ...named(owners[o], low)])].sort()])
+      .filter(([, files]) => files.length)
+    if (newWp === wp && !others.length && paths.length <= 1) return [f]
+    const mine = newWp !== null && Array.isArray(owners[newWp]) ? named(owners[newWp], low) : []
+    const original = { ...f, wp: newWp, scope: [...new Set([...(byOwner[newWp] || []), ...unowned, ...mine])].sort() }
+    if (newWp !== wp || paths.length > 1) {
+      const own = byOwner[newWp] || paths
+      original.file = own.length ? own[0] : f.file
+      if (paths.length && original.file !== paths[0]) delete original.line
+    }
+    if (newWp !== wp) original.wp_from = wp
+    return [original, ...others.map(([o, scope]) => {
       const part = { ...f, wp: o, file: scope[0], scope, split_from: f.fingerprint ?? null }
       delete part.line
+      delete part.wp_from
       const base = fingerprint(part)
       let fp = base
       for (let n = 2; taken.has(fp); n += 1) fp = `${base}-${n}`
