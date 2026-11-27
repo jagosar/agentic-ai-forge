@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from core import (  # noqa: E402
     ARCHIVE_DIR, DEFAULT_CODEMAP, ManifestError, ROOT, RULES_DIR, RULES_LIBRARY, SKIP_DIRS, at_entity, codemap_path,
-    die, docs_entity, ledger_stage, load_manifest, owns, source_files, symbol_re
+    die, docs_entity, ledger_stage, load_manifest, owns, qa_entity, source_files, symbol_re
 )
 
 # Signals for each rules pack: project files (in any folder) and code extensions.
@@ -345,13 +345,15 @@ def pin_argument(arg):
 
 
 def pin_tests(manifest):
-    """[(path, lines)] of the acceptance zone's files that read a file as text, in path order."""
-    zone = at_entity(manifest)["files"]
+    """[(path, lines, zone)] of the files of the acceptance zone ("AT") and of QA's zone ("QA") that read a file as
+    text, in path order; a file in both zones counts once, as AT."""
+    zones = (("AT", at_entity(manifest)["files"]), ("QA", qa_entity(manifest)["files"]))
     out = []
     for rel in source_files():
-        lines = pin_lines(rel) if any(owns(f, rel) for f in zone) else None
+        zone = next((z for z, files in zones if any(owns(f, rel) for f in files)), None)
+        lines = pin_lines(rel) if zone else None
         if lines is not None and PIN_READ_RE.search("\n".join(lines)):
-            out.append((rel, lines))
+            out.append((rel, lines, zone))
     return out
 
 
@@ -368,10 +370,10 @@ def pins_for(args, manifest):
             skipped.append(arg)
             continue
         name = found[0].rsplit("/", 1)[-1].lower()
-        mine = [(p, ls) for p, ls in tests if p != found[0] and name in "\n".join(ls).lower()]
+        mine = [(p, ls) for p, ls, _ in tests if p != found[0] and name in "\n".join(ls).lower()]
         pin = find_pin(found[0], found[1], source, mine)
         if pin:
-            pins.append(pin)
+            pins.append(dict(pin, zone=next(z for p, _, z in tests if p == pin["test"])))
     return pins, skipped
 
 

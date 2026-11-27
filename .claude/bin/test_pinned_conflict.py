@@ -146,7 +146,7 @@ class CommandCase(unittest.TestCase):
         return json.loads([ln for ln in r.stdout.strip().splitlines() if ln.startswith("{")][-1])
 
     PIN = {"file": "src/w.ps1", "line": 2, "test": "acceptance/t.Tests.ps1", "test_line": 5,
-           "text": "ShowBalloonTip(10000"}
+           "text": "ShowBalloonTip(10000", "zone": "AT"}
 
 
 class PinnedCommandTests(CommandCase):
