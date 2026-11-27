@@ -221,7 +221,8 @@ The same rules, reading `plan.owners` and `plan.root` as today. Helpers mirrored
 ## 11. Risks and open questions
 
 - **A reviewer that names the right package but the wrong file** is now moved to the file's owner. The evidence still names its files, which parts cover.
-- **The field JSON was not checked** (issue 149 is an extract): case 1's cause (the WP-03 part without a line) is inferred from the code.
+- **The field JSON confirms both cases** (`workflow-result.json` of the 2.22.2 run): the pinned original `F0c06345d` sat on WP-01 at `XMM.RemoteStream.psm1:30` while its part `F0c06345d-2` on WP-03, without a line, stayed confirmed and went to a fix; `Fceb84b39` (WP-01, three comma-joined paths, `line` 10) and `Fcb80fef6` (WP-01, eight comma-joined paths, `line` 133) kept a comma-joined `file` and `scope`, which `pinned` could not even check.
+- **A pinned finding that names several lines of one file** goes to pending whole: in the field run, `F0c06345d` also named line 3 of the same file (123 characters), which a fix would then not touch. A person decides both.
 
 ## Annex A · Conformance scenarios
 
