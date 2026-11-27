@@ -153,6 +153,13 @@ NOTES = {
         "A workflow-subagent (the type the Workflow tool's subagents may carry; not verified) cannot write files "
         "before it claims its zone. Bash stays open, so a gatekeeper with that type keeps working.",
     ],
+    "2.22.4": [
+        "A QA test left red on purpose no longer stops the run after a fix (issue 148). QA names those tests in its "
+        "report's `red_tests`; when every blocking phase of a later verification fails only on them, the run goes "
+        "on and records them in `qa_known_failures`. A failing line that names an open QA defect goes to its "
+        "package; anything else stops, naming QA's open defects. `agentic.py pinned` also reads QA's zone, and each "
+        "pin says its `zone`.",
+    ],
     "2.22.3": [
         "A finding goes to the package that owns its file (issue 149). The reviewer's `file` is read path by path, "
         "split on commas and semicolons; a finding whose `wp` owns none of those paths moves to the owner of the "

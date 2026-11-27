@@ -56,7 +56,7 @@ Then present it like this:
   - Spec (contracts, correctness, security): confirmed findings, findings refuted by the verifier (and why), and finish notices;
   - Standards (section 7 and the rules): confirmed reflex findings with the rule each breaks, refuted ones, finish notices, the waived ones with the waiver's reason, and the ones an acceptance test pins (`pinned`);
   - whether the rules reached the agents printed or only as paths (`rules`: `printed`, `pointed` or `none`).
-- **QA:** status, plan, defects and coverage gaps. `qa_passes` says how each pass ran: `full`, `scoped` (a re-check of what was fixed) or `kept` (a Standards-only fix: the earlier report stands; never after a QA blocked by the environment, which is called again in full).
+- **QA:** status, plan, defects and coverage gaps. `qa_passes` says how each pass ran: `full`, `scoped` (a re-check of what was fixed) or `kept` (a Standards-only fix: the earlier report stands; never after a QA blocked by the environment, which is called again in full). `qa_known_failures` lists the failing lines of tests QA left red on purpose (its `red_tests`) that a later verification saw: they did not count as new failures, so `verification` may show a failed phase beside a run that went on.
 - **Usage (`usage`, if recorded):** tokens by agent type from `usage.by_agent` (new input, cache read, output), and how many agents had no transcript (`missing`).
 - **Fixes:** `fix_cycles` and which WPs were fixed. A failed verification also goes to a fix cycle when `verification.suspects` names the package that owns the failure.
 - **Documentation (`docs`, if there was any):** files the doc-updater updated, whether the code map changed, and the result of `docs-check`.
@@ -64,7 +64,7 @@ Then present it like this:
   - **Design:** goes to `/architect`.
   - **Needs validation** (items of type `needs validation`): each item's claim, the fact to check and how; the person checks it, it never blocks.
   - **Concerns** (items of type `concern`): doubts an implementer raised about its own code (`DONE_WITH_CONCERNS`), per WP; the reviewer already weighed them, so say whether each became a finding.
-  - **Acceptance conflicts** (items of type `acceptance conflict`): a Standards finding on a line whose text an acceptance test pins by reading the file (`pinned_by`: the test, its line and the text). No fix was attempted and the run ends `REVIEW`: the person changes the test to check behaviour, or adds a waiver for that rule and file.
+  - **Acceptance conflicts** (items of type `acceptance conflict`): a Standards finding on a line whose text an acceptance test pins by reading the file (`pinned_by`: the test, its line, the text and its `zone`, `AT` or `QA`). No fix was attempted and the run ends `REVIEW`: the person changes the test to check behaviour, or adds a waiver for that rule and file.
   - **Fix limit reached (per WP), or no WP:** the user decides.
 - **Not checked (`not_checked`):** per agent, what it did not check or skipped, plus QA's `gaps` and the doc-updater's `unverified`.
 - **Stages the hook did not guard:** a stage `check` that contains `GUARDRAIL HOOK SAW NO FLOW AGENT` means files changed with no hook call from an agent of the flow, so only the file comparison applied. Say so, and point to the `agent_type` recorded in `.claude/state/hook-seen.json` and to `/implement fallback`.

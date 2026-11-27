@@ -1,5 +1,5 @@
 {
-  "code_lines": 8439,
-  "prompt_bytes": 104035,
-  "why": "2.22.3 (design 0035, issue 149): +89 code lines for split_by_owner reading `file` path by path and correcting the wp to the file's owner, in findings.py and the workflow's mirror; prompt bytes unchanged"
+  "code_lines": 8633,
+  "prompt_bytes": 104707,
+  "why": "2.22.4 (design 0036, issue 148): +194 code lines for qa_triage and the failed-verification helper in both engines and QA's zone in pinned; +672 prompt bytes for qa.md's red_tests and source-text rules and /implement's qa_known_failures"
 }

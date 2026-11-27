@@ -226,7 +226,7 @@ class DefinitionTests(unittest.TestCase):
 class ReleaseTests(unittest.TestCase):
     def test_ac_008_release_2_22_0(self):
         plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(plugin["version"], "2.22.3")
+        self.assertEqual(plugin["version"], "2.22.4")
         import upgrade
         notes = upgrade.NOTES["2.22.0"]
         for word in ("brief", "acceptance_repairs"):
