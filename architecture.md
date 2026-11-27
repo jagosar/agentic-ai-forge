@@ -45,10 +45,11 @@ Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workfl
 .claude/workflows/agentic-implement.js   WP-01  the same, with mirrors of qa_triage and of zone in splitPinned; QA_SCHEMA
 .claude/workflows/pipeline-spec.json     WP-01  schemas.qa.red_tests
 .claude/bin/conformance.json             WP-01  three scenarios (Annex A)
-.claude/bin/test_workflow.mjs            WP-01  the pinned_by.zone test
+.claude/bin/test_workflow.mjs            WP-01  the pinned_by.zone test; qa_known_failures in the --dump summary
 .claude/bin/test_qa_triage.py            WP-01  new: unit cases
 .claude/bin/repo_scan.py                 WP-02  pin_tests over AT and QA; zone in each pin
 .claude/bin/test_pinned.py               WP-02  a QA-zone case
+.claude/bin/test_pinned_conflict.py      WP-02  its expected pin gains "zone": "AT" (lines 148-168)
 .claude/agents/qa.md                     WP-02  red_tests; no source-text assertions
 docs/how-it-works.md                     WP-03
 .claude/commands/implement.md            WP-03  qa_known_failures; pinned_by.zone
@@ -56,7 +57,7 @@ docs/how-it-works.md                     WP-03
 .claude/bin/upgrade.py                   WP-03  NOTES["2.22.4"]
 .claude/flow-budget.json                 WP-03
 .claude/bin/test_acceptance_v222.py      WP-03  its version pin (line 229): 2.22.4
-.claude/quality-baseline.json            by hand: agentic-implement.js's stored lines, raised in WP-01's commit
+.claude/quality-baseline.json            by hand (the person executing the plan): agentic-implement.js's stored lines, after WP-01
 .claude/bin/test_qa_baseline.py          AT
 .claude/flow-history.json                by hand: regenerated as the last commit
 ```
@@ -77,6 +78,9 @@ docs/how-it-works.md                     WP-03
 | `split_pinned` builds `pinned_by` from a pin; `_usable_pin` | `.claude/bin/findings.py:279-300`, `.claude/workflows/agentic-implement.js:270-282` | Copy `zone` when it is `"AT"` or `"QA"` | read |
 | A conformance scenario with a list of `verify` answers (`null` is the default green) | `.claude/bin/conformance.json:50-78` | Annex A uses the same keys | read |
 | The workflow is at 963 lines with an allowance of 967 (stored 937, growth 30) and 64 long lines | `.claude/quality-baseline.json`, `.claude/bin/quality.py:232-235` | Its stored `lines` is raised by hand in WP-01's commit, as designs 0033 and 0035 needed | read |
+| `test_pinned_conflict.py` compares `pinned`'s whole answer with a pin that has no `zone` | `.claude/bin/test_pinned_conflict.py:145-168` | WP-02 adds `"zone": "AT"` to its expected pin | read |
+| `Pipeline.judge` (stored 73 lines) and `runAfterPlan` (stored 128) are at their stored size; functions get no growth allowance | `.claude/quality-baseline.json`, `.claude/bin/quality.py:225-229` | The failed-verification branch moves into a new helper in each engine; neither function may grow | read |
+| The `--dump` summary of the native engine | `.claude/bin/test_workflow.mjs:576-589` | WP-01 adds `qa_known_failures` | read |
 | Release notes newest first, `2.22.3` at the top | `.claude/bin/upgrade.py:156-162` | `2.22.4` right before it | read |
 
 What must NOT change: a verification with no QA report, or whose failures match no declared red test and name no QA defect, takes today's path (defects from `suspects`, or the stop) with today's gate calls; `pinned`'s answer for acceptance pins (only `zone` is added).
@@ -95,6 +99,8 @@ QA's report, new optional field:
 "red_tests": [{"test": "<the test's name as the runner prints it>", "defect": "D1"}]
 ```
 
+The QA schema's new property, in both copies: `red_tests: { type: 'array', items: obj(['test'], { test: TEXT, defect: TEXT }) }` (pipeline-spec: the same as JSON). `test` is required in an item, `defect` is not; `red_tests` is not in the schema's `required`.
+
 `run.qa_known_failures`: a list of `{"fix_cycle": <n>, "phase": "<name>", "line": "<failing line>"}`, each `(phase, line)` once. A pin gains `"zone": "AT" | "QA"`; `pinned_by` gains `zone` when the pin had it.
 
 ## 6. Contracts between modules
@@ -106,15 +112,15 @@ QA's report, new optional field:
 - `open`: the defects of `qa["defects"]` with a string `id`, as `{"id", "wp"}`, in order.
 - `red`: the strings `t["test"]` of `qa["red_tests"]` entries that are dicts with a non-empty string `test`.
 - For each phase of `verification["phases"]` whose `status` is `regression` or `fails` and whose `name` is not in `TRIAGED`:
-  - `lines` = `new_failures` when it is a non-empty list, else `failing_lines` when it is a non-empty list, else `[]`.
+  - `lines` = `new_failures` when it is a non-empty list, else `failing_lines` when it is a non-empty list, else `[]` (never `tail`: do not reuse `pipeline_parts.failing_lines`, which falls back to it).
   - Each line containing (as a substring) one of `red` is **known**.
   - The phase is **cleared** when `lines` is non-empty, every line is known, and `len(lines) < MAX_FAILING_LINES` (10). A full list may hide more failures, so it is never cleared.
-  - Each line that is not known and matches `QA_ID_RE_TEMPLATE % re.escape(id)` (case-insensitive) for an `open` defect whose `wp` is a string gives one defect per such `(wp, id)`, once each, in order: `{"source": "verification", "severity": "high", "wp": <wp>, "file": "", "problem": "verification fails (<phase>) on QA's test of <id>", "evidence": "<phase>: <the matching lines joined by \\n>"[:1500]}`.
+  - Each line that is not known and matches `QA_ID_RE_TEMPLATE % re.escape(id)` with `re.IGNORECASE | re.ASCII` (JS: the `i` flag) for an `open` defect whose `wp` is a string gives one defect per such `(wp, id)`, once each, in order: `{"source": "verification", "severity": "high", "wp": <wp>, "file": "", "problem": "verification fails (<phase>) on QA's test of <id>", "evidence": "<phase>: <the matching lines joined by \\n>"[:1500]}`.
 - `MAX_FAILING_LINES` is a literal `10` in `findings.py` (`QA_TRIAGE_MAX_LINES = 10`, commented: as `verification.MAX_FAILING_LINES`).
 
 ### C2 · The engines' failed-verification branch (WP-01)
 
-At the start of the branch, after `verification_failures` is recorded:
+The whole branch moves into a new helper, `Pipeline.failed_verification(v)` in `pipeline.py` and `failedVerification(v)` in the workflow, returning one of `{"post": [...]}` (go on to the review), `{"defects": [...]}` (a fix cycle) or `{"stopped": <result>}`. `judge` and `runAfterPlan` call it and shrink or stay the same size: `quality` holds functions to their stored length. The helper, after recording `verification_failures`:
 
 1. `t = qaTriage(run.verification, run.qa)`. Append each `known` line to `run.qa_known_failures` as `{fix_cycle: run.fix_cycles, phase, line}`, unless that `(phase, line)` is there.
 2. `left` = `verification.blocking` without the `cleared` phases. When `left` is empty: one gate call `seq(['open-stage review', 'callers'], 'open-stage review')`; when its first step is not ok, stop `('verification', 'the review stage could not be opened')`; otherwise `post = [v, ...its steps]` and go on to the review exactly as a passing verification does.
@@ -125,7 +131,7 @@ At the start of the branch, after `verification_failures` is recorded:
 ### C3 · `repo_scan.pinned` and `split_pinned` (WP-02 and WP-01)
 
 - `pin_tests(manifest)` returns `[(path, lines, zone)]` over the files of the acceptance zone (`zone "AT"`) and of QA's zone (`qa_entity(manifest)["files"]`, `zone "QA"`), in path order, with the same reading rules as today. A file in both zones counts once, as `AT`.
-- `find_pin` and `pins_for` carry the zone: each pin is today's dict plus `"zone"`.
+- `find_pin(path, line, source, tests)` keeps its signature and its 2-tuples `(path, lines)`; `pins_for` passes it `[(p, ls) ...]` as today and adds `"zone"` to the pin it returns, from the zone of the test file the pin names.
 - `split_pinned` (and `splitPinned`): `pinned_by` gains `"zone": pin["zone"]` when it is `"AT"` or `"QA"`; otherwise `pinned_by` is as today.
 
 ## 7. Conventions
@@ -144,7 +150,7 @@ At the start of the branch, after `verification_failures` is recorded:
 - AC-001 · A QA test QA left red on purpose does not stop the verification after a fix (the bug)
   - Scenario: Annex A scenario "a QA test left red on purpose does not block the verification after a fix".
   - Action: the fallback engine (`test_pipeline.run_scenario`, and a `full_result` helper as in `.claude/bin/test_pinned_conflict.py:40-45`) and the native one (`node .claude/bin/test_workflow.mjs --dump`).
-  - Expected: `failed_stage` `None`, `result` `OK`, `fix_cycles` 1; the gates contain `open-stage review` twice (the first review and the one after the fix); `run.qa_known_failures` is `[{"fix_cycle": 1, "phase": "tests", "line": "qa/test_x.py::test_d1_flags_errors_only FAILED"}]`. Both engines agree on result, failed_stage, detail, fix_cycles, pending, gates, gate_calls, agents and prompts.
+  - Expected: `failed_stage` `None`, `result` `OK`, `fix_cycles` 1; the gates contain `open-stage review` twice (the first review and the one after the fix); `qa_known_failures` is `[{"fix_cycle": 1, "phase": "tests", "line": "qa/test_x.py::test_d1_flags_errors_only FAILED"}]` in the fallback's full result and in the native `--dump` summary. Both engines agree on result, failed_stage, detail, fix_cycles, pending, gates, gate_calls, agents and prompts.
   - Must not: the detail `a verification phase fails and no work package owns the failure`.
   - Check: `test_qa_baseline.py`, AC-001 tests.
   - WP: WP-01
@@ -209,19 +215,21 @@ At the start of the branch, after `verification_failures` is recorded:
   - Both engines in one package: `test_pipeline.ConformanceTests` compares their prompts and gates.
   - After clearing, `post` must look like a passing `WAVE_TAIL`: `[verify, open-stage review, callers]`. The review reads `post[1]` (opened) and `post[2]` (callers).
   - The schema in `agentic-implement.js` must equal `pipeline-spec.json`'s (`test_workflow.mjs` asserts it).
-  - The workflow grows past its allowance (963 of 967): raise its stored `lines` in `.claude/quality-baseline.json` by hand in this package's commit, saying why; never `long_lines`.
+  - The workflow grows past its allowance (963 of 967): the person executing the plan raises its stored `lines` in `.claude/quality-baseline.json` after this package, saying why; never `long_lines` and never a function's entry.
+  - `judge` and `runAfterPlan` may not grow: move the branch into `failed_verification` / `failedVerification`.
+  - Append the Annex A scenarios to `scenarios` and write the file with `json.dumps(data, indent=2)` plus a final newline (its current format).
   - Known red until WP-02 and WP-03: AC-005, AC-007's `qa.md` part, AC-008, `test_lean` and `test_lean_hook`'s budget checks.
-- **Exact imports and APIs:** in `pipeline.py`, add `qa_triage` to the `from findings import (...)` block; `failing_lines` is in `pipeline_parts`. In the workflow: `seq`, `step`, `ok`, `isWp`, `stop`.
+- **Exact imports and APIs:** in `pipeline.py`, add `qa_triage` to the `from findings import (...)` block. In the workflow: `seq`, `step`, `ok`, `isWp`, `stop`.
 - **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_qa_triage.py`; `node .claude/bin/test_workflow.mjs`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
 #### WP-02 · QA's zone can pin a line, and QA is told
 - Wave 1.
-- Files: `.claude/bin/repo_scan.py`, `.claude/bin/test_pinned.py`, `.claude/agents/qa.md`.
+- Files: `.claude/bin/repo_scan.py`, `.claude/bin/test_pinned.py`, `.claude/bin/test_pinned_conflict.py`, `.claude/agents/qa.md`.
 - Implements C3's `pinned` part.
 - ACs: AC-005, AC-007 (qa.md).
 - **Patterns to mirror:** `.claude/bin/repo_scan.py:347-380`; `.claude/agents/qa.md:36-38`.
-- **What to write in `qa.md`:** in Process step 4, "Do not assert on the source text of production code when the behaviour can be observed through section 6: a Standards fix that reformats the line breaks such a test." In the Report section, after `plan`, a bullet: "`red_tests`: each test you leave red on purpose, as `{"test": <its name as the runner prints it>, "defect": <the defect's id>}`; after a fix the flow does not count those as new failures."
-- **Gotchas:** `qa_entity` must be added to the `from core import (...)` block of `repo_scan.py`. A file in both zones is tagged `AT`.
+- **What to write in `qa.md`:** in Process step 4, "Do not assert on the source text of production code when the behaviour can be observed through section 6: a Standards fix that reformats the line breaks such a test." In the Report section, after `plan`, a bullet: "`red_tests`: each test you leave red on purpose, as `{"test": <its name as the runner prints it>, "defect": <the defect's id>}`; after a fix the flow does not count those as new failures. In a re-check, list again every red test that is still red."
+- **Gotchas:** known red until WP-01 and WP-03: AC-001..004, AC-006, AC-007's schema part, AC-008 and `test_lean`'s budget. `qa_entity` must be added to the `from core import (...)` block of `repo_scan.py`. A file in both zones is tagged `AT`.
 - **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_pinned.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
 #### WP-03 · Documentation and release 2.22.4
@@ -244,7 +252,7 @@ At the start of the branch, after `verification_failures` is recorded:
   "work_packages": [
     {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/findings.py", ".claude/bin/pipeline.py", ".claude/workflows/agentic-implement.js", ".claude/workflows/pipeline-spec.json", ".claude/bin/conformance.json", ".claude/bin/test_workflow.mjs", ".claude/bin/test_qa_triage.py"],
      "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-006", "AC-007"], "mirror": [".claude/bin/findings.py:279-300", ".claude/workflows/agentic-implement.js:893-918", ".claude/bin/pipeline.py:623-645", ".claude/bin/conformance.json:50-78"]},
-    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/repo_scan.py", ".claude/bin/test_pinned.py", ".claude/agents/qa.md"],
+    {"id": "WP-02", "wave": 1, "depends_on": [], "files": [".claude/bin/repo_scan.py", ".claude/bin/test_pinned.py", ".claude/bin/test_pinned_conflict.py", ".claude/agents/qa.md"],
      "acs": ["AC-005", "AC-007"], "mirror": [".claude/bin/repo_scan.py:347-380", ".claude/agents/qa.md:36-38"]},
     {"id": "WP-03", "wave": 2, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", ".claude/commands/implement.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
      "acs": ["AC-008"], "mirror": [".claude/bin/upgrade.py:156-162", ".claude/commands/implement.md:59"]}
@@ -276,6 +284,7 @@ At the start of the branch, after `verification_failures` is recorded:
 ## 11. Risks and open questions
 
 - **QA forgetting `red_tests`** gives today's behaviour for its red tests (the stop), now with its open defects named.
+- **A re-check that leaves out `red_tests`** replaces `run.qa` whole and brings the stop back; `qa.md` asks QA to list them again.
 - **A short or generic red test name** may match other failing lines. Not measured; QA names carry the defect id.
 - **The workflow's line allowance** is raised by hand again (WP-01).
 
