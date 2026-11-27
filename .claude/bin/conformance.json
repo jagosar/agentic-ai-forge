@@ -2634,6 +2634,223 @@
           }
         }
       ]
+    },
+    {
+      "name": "a QA test left red on purpose does not block the verification after a fix",
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-02",
+              "file": "src/b/x.py",
+              "problem": "STD-PROBLEM",
+              "evidence": "e",
+              "fix": "f",
+              "if_skipped": "s",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        }
+      ],
+      "qa": [
+        {
+          "status": "PASS",
+          "plan": [
+            "contracts",
+            "test_d1 stays red on purpose"
+          ],
+          "gaps": [],
+          "defects": [
+            {
+              "tier": "finish",
+              "id": "D1",
+              "severity": "low",
+              "wp": "WP-02",
+              "kind": "implementation",
+              "section": "6",
+              "repro": "r",
+              "fix": "f",
+              "if_skipped": "s"
+            }
+          ],
+          "red_tests": [
+            {
+              "test": "test_d1_flags_errors_only",
+              "defect": "D1"
+            }
+          ]
+        }
+      ],
+      "verify": [
+        null,
+        {
+          "exit_code": 3,
+          "output": {
+            "ok": false,
+            "blocking": [
+              "tests"
+            ],
+            "preexisting_failures": [],
+            "suspects": {},
+            "zone_suspects": {},
+            "phases": [
+              {
+                "name": "tests",
+                "passed": false,
+                "status": "regression",
+                "failing_lines": [
+                  "qa/test_x.py::test_d1_flags_errors_only FAILED"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a failing QA test that names an open defect goes to its package",
+      "qa": [
+        {
+          "status": "FAIL",
+          "plan": [
+            "contracts"
+          ],
+          "gaps": [],
+          "defects": [
+            {
+              "tier": "floor",
+              "id": "D1",
+              "severity": "high",
+              "wp": "WP-01",
+              "kind": "implementation",
+              "section": "6",
+              "repro": "r",
+              "fix": "f",
+              "if_skipped": "s"
+            },
+            {
+              "tier": "finish",
+              "id": "D2",
+              "severity": "low",
+              "wp": "WP-02",
+              "kind": "implementation",
+              "section": "6",
+              "repro": "r",
+              "fix": "f",
+              "if_skipped": "s"
+            }
+          ]
+        },
+        {
+          "status": "PASS",
+          "plan": [
+            "contracts"
+          ],
+          "gaps": [],
+          "defects": []
+        }
+      ],
+      "verify": [
+        null,
+        {
+          "exit_code": 3,
+          "output": {
+            "ok": false,
+            "blocking": [
+              "tests"
+            ],
+            "preexisting_failures": [],
+            "suspects": {},
+            "zone_suspects": {},
+            "phases": [
+              {
+                "name": "tests",
+                "passed": false,
+                "status": "regression",
+                "failing_lines": [
+                  "qa/test_y.py::test_d2_rejects_empty FAILED"
+                ]
+              }
+            ]
+          }
+        },
+        null
+      ]
+    },
+    {
+      "name": "an unowned failure after QA names QA's open defects",
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-02",
+              "file": "src/b/x.py",
+              "problem": "STD-PROBLEM",
+              "evidence": "e",
+              "fix": "f",
+              "if_skipped": "s",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        }
+      ],
+      "qa": [
+        {
+          "status": "PASS",
+          "plan": [
+            "contracts"
+          ],
+          "gaps": [],
+          "defects": [
+            {
+              "tier": "finish",
+              "id": "D1",
+              "severity": "low",
+              "wp": "WP-02",
+              "kind": "implementation",
+              "section": "6",
+              "repro": "r",
+              "fix": "f",
+              "if_skipped": "s"
+            }
+          ]
+        }
+      ],
+      "verify": [
+        null,
+        {
+          "exit_code": 3,
+          "output": {
+            "ok": false,
+            "blocking": [
+              "tests"
+            ],
+            "preexisting_failures": [],
+            "suspects": {},
+            "zone_suspects": {},
+            "phases": [
+              {
+                "name": "tests",
+                "passed": false,
+                "status": "regression",
+                "failing_lines": [
+                  "qa/test_z.py::test_other_check FAILED"
+                ]
+              }
+            ]
+          }
+        }
+      ]
     }
   ]
 }

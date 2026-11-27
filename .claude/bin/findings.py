@@ -22,6 +22,10 @@ ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstu
 QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see the pending items of kind "qa not run")'
 QA_NOT_RUN_FACT = "not run: the environment refused it"
 PATH_SEPARATORS = re.compile(r"\s*[,;]\s*")  # a reviewer may join several paths into one `file`
+PIN_ZONES = ("AT", "QA")  # the zones whose tests may pin a line (design 0036)
+QA_ID_RE_TEMPLATE = r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])"  # a defect id as a whole word, ASCII case folded
+TRIAGED = ("quality", "acceptance")  # phases never triaged: their failures are never QA's tests
+QA_TRIAGE_MAX_LINES = 10  # as verification.MAX_FAILING_LINES: a full list may hide more failures
 PIN_PATH = r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*"  # a repo-relative path the gate can pass unquoted
 PIN_MAX_ARGS = 40  # arguments of one pinned call, so the command stays short
 ACCEPTANCE_CONFLICT_DECISION = (
@@ -293,7 +297,10 @@ def split_pinned(findings, root, answer):
         path = pin_path(f, root)
         pin = pins.get((path, f["line"])) if path and f"{path}:{f['line']}" in wanted else None
         if pin:
-            pinned.append({**f, "pinned_by": {"test": pin["test"], "test_line": pin["test_line"], "text": pin["text"]}})
+            by = {"test": pin["test"], "test_line": pin["test_line"], "text": pin["text"]}
+            if pin.get("zone") in PIN_ZONES:
+                by["zone"] = pin["zone"]
+            pinned.append({**f, "pinned_by": by})
         else:
             kept.append(f)
     return kept, pinned
@@ -303,3 +310,63 @@ def conflict_item(finding):
     """The pending item of a pinned finding: the finding, no fix attempted, and what a person can do."""
     return {"type": "acceptance conflict", "source": "standards-reviewer", **finding,
             "decision": ACCEPTANCE_CONFLICT_DECISION}
+
+
+def _triage_lines(phase):
+    """A failing phase's lines for the triage: new_failures, else failing_lines; never its tail."""
+    for key in ("new_failures", "failing_lines"):
+        value = phase.get(key)
+        if isinstance(value, list) and value:
+            return [x for x in value if isinstance(x, str)]
+    return []
+
+
+def _qa_lists(qa):
+    """(open defects [{"id", "wp"}], red test names) of a QA report."""
+    defects = qa.get("defects") if isinstance(qa.get("defects"), list) else []
+    open_ = [{"id": d["id"], "wp": d.get("wp")} for d in defects
+             if isinstance(d, dict) and isinstance(d.get("id"), str)]
+    reds = qa.get("red_tests") if isinstance(qa.get("red_tests"), list) else []
+    red = [t["test"] for t in reds if isinstance(t, dict) and isinstance(t.get("test"), str) and t["test"]]
+    return open_, red
+
+
+def _named_defects(name, lines, open_):
+    """One verification defect per (wp, id) of an open QA defect whose id a line names as a whole word."""
+    out, seen = [], set()
+    for d in open_:
+        if not isinstance(d["wp"], str) or (d["wp"], d["id"]) in seen:
+            continue
+        rx = re.compile(QA_ID_RE_TEMPLATE % re.escape(d["id"]), re.IGNORECASE | re.ASCII)
+        hits = [line for line in lines if rx.search(line)]
+        if hits:
+            seen.add((d["wp"], d["id"]))
+            out.append({"source": "verification", "severity": "high", "wp": d["wp"], "file": "",
+                        "problem": f"verification fails ({name}) on QA's test of {d['id']}",
+                        "evidence": (f"{name}: " + "\n".join(hits))[:1500]})
+    return out
+
+
+def qa_triage(verification, qa):
+    """What QA's last report says about a failed verification: the failing lines that are tests QA left red on
+    purpose ("known"), the phases made only of them ("cleared"), whether every blocking phase is cleared, defects for
+    the open QA defects other lines name, and QA's open defects. Pure; never raises."""
+    out = {"known": [], "cleared": [], "all_cleared": False, "defects": [], "open": []}
+    if not isinstance(qa, dict):
+        return out
+    out["open"], red = _qa_lists(qa)
+    phases = verification.get("phases") if isinstance(verification, dict) else None
+    for p in phases if isinstance(phases, list) else []:
+        if not isinstance(p, dict) or p.get("status") not in ("regression", "fails") or p.get("name") in TRIAGED:
+            continue
+        name, lines = str(p.get("name")), _triage_lines(p)
+        known = [line for line in lines if any(t in line for t in red)]
+        out["known"] += [{"phase": name, "line": line} for line in known]
+        if lines and len(known) == len(lines) and len(lines) < QA_TRIAGE_MAX_LINES:
+            out["cleared"].append(name)
+        taken = {(d["wp"], d["problem"]) for d in out["defects"]}
+        out["defects"] += [d for d in _named_defects(name, [x for x in lines if x not in known], out["open"])
+                           if (d["wp"], d["problem"]) not in taken]
+    blocking = verification.get("blocking") if isinstance(verification, dict) else None
+    out["all_cleared"] = isinstance(blocking, list) and bool(blocking) and all(b in out["cleared"] for b in blocking)
+    return out

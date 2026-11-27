@@ -80,6 +80,8 @@ const QA_SCHEMA = obj(['status', 'plan', 'defects', 'gaps', 'needs_validation'],
   // Optional: a BLOCKER the environment caused (a command refused, a tool missing), and the commands QA could not run.
   blocker_kind: { type: 'string', enum: ['environment', 'design'] },
   not_run: { type: 'array', items: { type: 'string' } },
+  // Optional: the tests QA leaves red on purpose, each with the defect it reproduces (design 0036).
+  red_tests: { type: 'array', items: obj(['test'], { test: { type: 'string' }, defect: { type: 'string' } }) },
 })
 // A re-review: one verdict per fingerprint it was given; anything new is recorded and never reopens the fix.
 const TEXT = { type: 'string' }
@@ -276,13 +278,54 @@ const splitPinned = (findings, answer) => {
   for (const f of findings) {
     const path = pinPath(f)
     const pin = path && wanted.has(`${path}:${f.line}`) ? pins.find(p => p.file === path && p.line === f.line) : null
-    if (pin) out.pinned.push({ ...f, pinned_by: { test: pin.test, test_line: pin.test_line, text: pin.text } })
+    const by = { test: pin && pin.test, test_line: pin && pin.test_line, text: pin && pin.text }
+    if (pin && ['AT', 'QA'].includes(pin.zone)) by.zone = pin.zone
+    if (pin) out.pinned.push({ ...f, pinned_by: by })
     else out.kept.push(f)
   }
   return out
 }
 const conflictItem = f =>
   ({ type: 'acceptance conflict', source: 'standards-reviewer', ...f, decision: ACCEPTANCE_CONFLICT_DECISION })
+// findings.py's qa_triage: the failing lines of a failed verification that are tests QA left red on purpose, the
+// phases made only of them, whether every blocking phase is cleared, and defects for the open QA defects lines name.
+const TRIAGED = ['quality', 'acceptance']
+const QA_TRIAGE_MAX_LINES = 10
+const triageLines = p => (['new_failures', 'failing_lines'].map(k => p[k])
+  .find(x => Array.isArray(x) && x.length) || []).filter(x => typeof x === 'string')
+const qaTriage = (v, qa) => {
+  const out = { known: [], cleared: [], all_cleared: false, defects: [], open: [] }
+  if (!qa || typeof qa !== 'object' || Array.isArray(qa)) return out
+  out.open = (Array.isArray(qa.defects) ? qa.defects : [])
+    .filter(d => d && typeof d === 'object' && typeof d.id === 'string')
+    .map(d => ({ id: d.id, wp: d.wp === undefined ? null : d.wp }))
+  const red = (Array.isArray(qa.red_tests) ? qa.red_tests : []).filter(t => t && typeof t === 'object' &&
+    typeof t.test === 'string' && t.test).map(t => t.test)
+  const phases = v && typeof v === 'object' && Array.isArray(v.phases) ? v.phases : []
+  for (const p of phases) {
+    if (!p || typeof p !== 'object' || !['regression', 'fails'].includes(p.status) || TRIAGED.includes(p.name)) continue
+    const name = String(p.name)
+    const lines = triageLines(p)
+    const known = lines.filter(l => red.some(t => l.includes(t)))
+    out.known.push(...known.map(line => ({ phase: name, line })))
+    if (lines.length && known.length === lines.length && lines.length < QA_TRIAGE_MAX_LINES) out.cleared.push(name)
+    const rest = lines.filter(l => !known.includes(l))
+    const seen = new Set()
+    for (const d of out.open) {
+      if (typeof d.wp !== 'string' || seen.has(`${d.wp}|${d.id}`)) continue
+      const rx = new RegExp(`(?<![A-Za-z0-9])${d.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9])`, 'i')
+      const hits = rest.filter(l => rx.test(l))
+      const problem = `verification fails (${name}) on QA's test of ${d.id}`
+      if (!hits.length || out.defects.some(x => x.wp === d.wp && x.problem === problem)) continue
+      seen.add(`${d.wp}|${d.id}`)
+      out.defects.push({ source: 'verification', severity: 'high', wp: d.wp, file: '', problem,
+        evidence: `${name}: ${hits.join('\n')}`.slice(0, 1500) })
+    }
+  }
+  const blocking = v && typeof v === 'object' ? v.blocking : null
+  out.all_cleared = Array.isArray(blocking) && blocking.length > 0 && blocking.every(b => out.cleared.includes(b))
+  return out
+}
 // Each agent reads the slice of architecture.md that `agentic.py briefs` wrote for it, not the whole document.
 const brief = id => `.claude/state/briefs/${id}.md`
 // The writers' prompts carry no rules (they end their brief); this sentence asks for an acceptance repair.
@@ -306,7 +349,7 @@ const unchangedClaims = (report, out, id) => {
     ? report.files.filter(f => !seen.some(s => f === s || f.endsWith('/' + s)))
     : []
 }
-const run = { result: 'REVIEW', stages: [], baseline: null, work_packages: {}, verification: null, review: null, qa: null, test_audit: null, docs: null, fix_cycles: 0, pending: [], not_checked: [], gate_denials: {}, verification_failures: [], agent_calls: 0, environment_retries: [], qa_passes: [], acceptance_repairs: [] }
+const run = { result: 'REVIEW', stages: [], baseline: null, work_packages: {}, verification: null, review: null, qa: null, test_audit: null, docs: null, fix_cycles: 0, pending: [], not_checked: [], gate_denials: {}, verification_failures: [], agent_calls: 0, environment_retries: [], qa_passes: [], acceptance_repairs: [], qa_known_failures: [] }
 // Keeps each report's not_checked per call; passes `model` only when set (escalation); counts every call, failed too.
 const report = async (prompt, opts) => {
   const { model, ...rest } = opts
@@ -832,6 +875,50 @@ const qaStage = async () => {
 }
 
 const reviewStage = post => (reviewed ? reReviewStage(post) : fullReview(post))
+// pipeline.py's failed_verification (design 0036): { post } when QA's report clears the failure, so the review
+// follows; { again, post } after a fix cycle; { end } when the run stops or ends. The packages that own what a failing
+// phase mentions, or the package of an open QA defect a failing line names, get it as a defect; else a person decides.
+const NO_OWNER = 'a verification phase fails and no work package owns the failure (see verification)'
+const withoutCleared = (v, cleared) => {
+  if (!cleared.length || !v || typeof v !== 'object') return v
+  const suspects = {}
+  for (const [wp, info] of Object.entries(v.suspects || {})) {
+    const phases = (info.phases || []).filter(p => !cleared.includes(p))
+    if (phases.length) suspects[wp] = { ...info, phases }
+  }
+  return { ...v, suspects }
+}
+async function failedVerification(v) {
+  // Each failed verification stays in the result: the run's last verification overwrites the earlier ones.
+  const V = run.verification && typeof run.verification === 'object' ? run.verification : {}
+  run.verification_failures.push({
+    fix_cycle: run.fix_cycles, blocking: V.blocking || [], suspects: V.suspects || {},
+    failing: (V.phases || []).filter(p => p.status === 'regression' || p.status === 'fails')
+      .map(p => ({ name: p.name, status: p.status, tail: p.tail || [] })),
+  })
+  const t = qaTriage(run.verification, run.qa)
+  for (const k of t.known) {
+    const seen = run.qa_known_failures.some(x => x.phase === k.phase && x.line === k.line)
+    if (!seen) run.qa_known_failures.push({ fix_cycle: run.fix_cycles, ...k })
+  }
+  if (t.all_cleared) {
+    const res = await seq(['open-stage review', 'callers'], 'open-stage review')
+    if (!ok(step(res, 0))) return { end: stop('verification', 'the review stage could not be opened') }
+    return { post: [v, ...res.steps] }
+  }
+  const defects = verificationDefects(withoutCleared(run.verification, t.cleared))
+  const owned = new Set(defects.map(d => d.wp))
+  defects.push(...t.defects.filter(d => isWp(d.wp) && !owned.has(d.wp)))
+  const named = t.open.map(d => `${d.id} (${typeof d.wp === 'string' ? d.wp : 'no WP'})`).join(', ')
+  const note = t.open.length ? `; QA's open defects: ${named}` : ''
+  if (!defects.length) return { end: stop('verification', NO_OWNER + note) }
+  const eligible = splitByLimit(defects)
+  run.pending = pendingNow()
+  if (!eligible.length) return { end: run }
+  const fixed = await fixCycle(eligible, false)
+  if (fixed.stopped) return { end: fixed.stopped }
+  return { again: true, post: fixed.post }
+}
 // The rest of the run, from briefs on.
 const runAfterPlan = async () => {
 if (!ok(step(first, 2))) return stop('prepare', 'briefs failed', { gate: step(first, 2) })
@@ -898,23 +985,10 @@ while (true) {
   if (!v) return stop('verification', LOST)
   run.verification = lastJson(v.output)
   if (!ok(v)) {
-    // Each failed verification stays in the result: the run's last verification overwrites the earlier ones.
-    const V = run.verification && typeof run.verification === 'object' ? run.verification : {}
-    run.verification_failures.push({
-      fix_cycle: run.fix_cycles, blocking: V.blocking || [], suspects: V.suspects || {},
-      failing: (V.phases || []).filter(p => p.status === 'regression' || p.status === 'fails').map(p => ({ name: p.name, status: p.status, tail: p.tail || [] })),
-    })
-    // A phase fails: if what it mentions belongs to packages, they get the failure as a defect and go through a fix
-    // cycle; if it belongs to nobody (a pre-existing, environmental or cross-cutting failure), a person decides.
-    const defects = verificationDefects(run.verification)
-    if (!defects.length) return stop('verification', 'a verification phase fails and no work package owns the failure (see verification)')
-    const eligible = splitByLimit(defects)
-    run.pending = pendingNow()
-    if (!eligible.length) return run
-    const fixed = await fixCycle(eligible, false)
-    if (fixed.stopped) return fixed.stopped
-    post = fixed.post
-    continue
+    const out = await failedVerification(v)
+    if (out.end) return out.end
+    post = out.post
+    if (out.again) continue
   }
 
   const reviewed = await reviewStage(post)

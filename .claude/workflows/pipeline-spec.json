@@ -667,6 +667,23 @@
           "items": {
             "type": "string"
           }
+        },
+        "red_tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "test"
+            ],
+            "properties": {
+              "test": {
+                "type": "string"
+              },
+              "defect": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

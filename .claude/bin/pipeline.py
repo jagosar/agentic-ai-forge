@@ -15,8 +15,8 @@ the package's own session, which only the fallback can) and schema= (a re-review
 import re
 
 from findings import (
-    QA_NOT_RUN_DETAIL, blocks, conflict_item, pinned_args, qa_environment_blocked, qa_not_run_items, split_by_owner,
-    split_pinned, waiver_for, with_fingerprints
+    QA_NOT_RUN_DETAIL, blocks, conflict_item, pinned_args, qa_environment_blocked, qa_not_run_items, qa_triage,
+    split_by_owner, split_pinned, waiver_for, with_fingerprints
 )
 from pipeline_parts import (  # noqa: F401 - re-exported: launch.py and the tests read them as pipeline.<name>
     lines_json, compact, PLACEHOLDER_RE, render, brief, threaded, WAVE_TAIL, ANSWERED, RETRY_OUTPUT, NOT_RUN_RE,
@@ -24,6 +24,28 @@ from pipeline_parts import (  # noqa: F401 - re-exported: launch.py and the test
     failing_lines, gate_line, concern_item, untested_items, not_run, missing_context, pending_key, REVIEW_SOURCES,
     AXES, AXIS_NAMES, NO_RE_REVIEW, RE_REVIEW_SCHEMA, POINTED_RULES, rules_of, acceptance_blocked
 )
+
+
+NO_OWNER = "a verification phase fails and no work package owns the failure (see verification)"
+
+
+def without_cleared(v, cleared):
+    """The verification with the phases QA's report cleared taken out of its suspects (a suspect left with none goes)."""
+    if not cleared or not isinstance(v, dict):
+        return v
+    suspects = {}
+    for wp, info in (v.get("suspects") or {}).items():
+        phases = [p for p in (info.get("phases") or []) if p not in cleared]
+        if phases:
+            suspects[wp] = {**info, "phases": phases}
+    return {**v, "suspects": suspects}
+
+
+def open_defects_note(open_):
+    """"; QA's open defects: D1 (WP-07), ..." for the stop's detail, or "" when QA has none."""
+    if not open_:
+        return ""
+    return "; QA's open defects: " + ", ".join("{} ({})".format(d["id"], d["wp"] if isinstance(d["wp"], str) else "no WP") for d in open_)
 
 
 class Pipeline:
@@ -55,7 +77,7 @@ class Pipeline:
         self.run = {"result": "REVIEW", "stages": [], "baseline": None, "work_packages": {}, "verification": None,
                     "review": None, "qa": None, "test_audit": None, "docs": None, "fix_cycles": 0, "pending": [],
                     "not_checked": [], "gate_denials": {}, "verification_failures": [], "agent_calls": 0,
-                    "environment_retries": [], "qa_passes": [], "acceptance_repairs": []}
+                    "environment_retries": [], "qa_passes": [], "acceptance_repairs": [], "qa_known_failures": []}
 
     # ---------- utilities ----------
     def stop(self, stage, detail, **extra):
@@ -620,6 +642,36 @@ class Pipeline:
         run["qa_passes"].append({"mode": mode, "status": run["qa"]["status"], "defects": len(run["qa"]["defects"])})
         return run["qa"]
 
+    def failed_verification(self, v):
+        """A failed verification (design 0036): ("post", post) when QA's report clears it, so the review follows;
+        ("again", post) after a fix cycle; ("end", result) when the run stops or ends. The packages that own what a
+        failing phase mentions, or the package of an open QA defect a failing line names, get it as a defect; if
+        nobody owns it, a person decides."""
+        run = self.run
+        self.record_verification_failure(run["verification"])
+        triage = qa_triage(run["verification"], run["qa"])
+        for k in triage["known"]:
+            if not any(x["phase"] == k["phase"] and x["line"] == k["line"] for x in run["qa_known_failures"]):
+                run["qa_known_failures"].append({"fix_cycle": run["fix_cycles"], **k})
+        if triage["all_cleared"]:
+            res = self.seq(["open-stage review", "callers"], "open-stage review")
+            if not self.ok(self.step(res, 0)):
+                return "end", self.stop("verification", "the review stage could not be opened")
+            return "post", [v] + res["steps"]
+        defects = self.verification_defects(without_cleared(run["verification"], triage["cleared"]))
+        owned = {d["wp"] for d in defects}
+        defects += [d for d in triage["defects"] if d["wp"] in self.plan["wave_of"] and d["wp"] not in owned]
+        if not defects:
+            return "end", self.stop("verification", NO_OWNER + open_defects_note(triage["open"]))
+        eligible = self.split_by_limit(defects)
+        run["pending"] = self.pending_now()
+        if not eligible:
+            return "end", run
+        fixed = self.fix_cycle(eligible, False)
+        if fixed.get("stopped"):
+            return "end", fixed["stopped"]
+        return "again", fixed["post"]
+
     def judge(self, post):
         plan, run = self.plan, self.run
         while True:
@@ -629,20 +681,12 @@ class Pipeline:
                 return self.stop("verification", LOST)
             run["verification"] = lines_json(v["output"])
             if not self.ok(v):
-                self.record_verification_failure(run["verification"])
-                # A phase fails: the packages that own what it mentions get it as a defect; if nobody owns it, a person decides.
-                defects = self.verification_defects(run["verification"])
-                if not defects:
-                    return self.stop("verification", "a verification phase fails and no work package owns the failure (see verification)")
-                eligible = self.split_by_limit(defects)
-                run["pending"] = self.pending_now()
-                if not eligible:
-                    return run
-                fixed = self.fix_cycle(eligible, False)
-                if fixed.get("stopped"):
-                    return fixed["stopped"]
-                post = fixed["post"]
-                continue
+                kind, value = self.failed_verification(v)
+                if kind == "end":
+                    return value
+                post = value
+                if kind == "again":
+                    continue
 
             reviewed = self.review_stage(post)
             if "stopped" in reviewed:

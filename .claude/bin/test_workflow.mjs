@@ -584,6 +584,7 @@ const summarize = ({ result, calls, gates, gateCalls }) => {
     agent_calls: result.agent_calls, models: models.sort(), re_review: reReviewCounts(result.review),
     qa_passes: (result.qa_passes || []).map(p => p.mode),
     acceptance_repairs: result.acceptance_repairs || [],
+    qa_known_failures: result.qa_known_failures || [],
     environment_retries: (result.environment_retries || []).map(r => ({ cmd: r.cmd, exit_code: r.exit_code })),
     untested: (result.pending || []).filter(p => p.kind === 'tests not run').map(p => ({ wp: p.wp, claim: p.claim, fact: p.fact })),
   }
@@ -643,6 +644,13 @@ test('a pinned finding becomes an acceptance conflict item with its test and its
   assert.match(item.decision, /^the fix would break the acceptance test that pins this line's text/)
   assert.deepEqual(result.review.standards.confirmed, [])
   assert.equal(result.review.standards.pinned.length, 1)
+})
+
+test('a pin from QA\'s zone names its zone in pinned_by', async () => {
+  const decl = JSON.parse(JSON.stringify(conformance.scenarios.find(d => d.name === 'a reflex finding pinned by an acceptance test goes to pending')))
+  decl.gate_fail[0].output.pinned[0].zone = 'QA'
+  const { result } = await simulate(fromDecl(decl), decl.args || {})
+  assert.equal(result.pending.find(p => p.type === 'acceptance conflict').pinned_by.zone, 'QA')
 })
 
 test('every conformance scenario ends as described in its name', async () => {
