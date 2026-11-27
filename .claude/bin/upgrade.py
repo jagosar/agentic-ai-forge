@@ -153,6 +153,12 @@ NOTES = {
         "A workflow-subagent (the type the Workflow tool's subagents may carry; not verified) cannot write files "
         "before it claims its zone. Bash stays open, so a gatekeeper with that type keeps working.",
     ],
+    "2.22.3": [
+        "A finding goes to the package that owns its file (issue 149). The reviewer's `file` is read path by path, "
+        "split on commas and semicolons; a finding whose `wp` owns none of those paths moves to the owner of the "
+        "first one, keeping its line and the reviewer's choice in `wp_from`, so a pinned line now marks the right "
+        "package; every other owner of a path gets a part, and `scope` is always a list of single paths.",
+    ],
     "2.22.2": [
         "Native /implement works in a git worktree. Claude Code keeps CLAUDE_PROJECT_DIR at the checkout the session "
         "started in, so the hook ran that checkout's guard, wrote its heartbeat there and refused every write in a "

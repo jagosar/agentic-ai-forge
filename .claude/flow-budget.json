@@ -1,5 +1,5 @@
 {
-  "code_lines": 8350,
+  "code_lines": 8439,
   "prompt_bytes": 104035,
-  "why": "2.22.2 (design 0034): +143 code lines for the worktree root in hook.py (linked_worktree, the session's remembered root) and core.project_root, with their unit and acceptance tests; prompt bytes unchanged"
+  "why": "2.22.3 (design 0035, issue 149): +89 code lines for split_by_owner reading `file` path by path and correcting the wp to the file's owner, in findings.py and the workflow's mirror; prompt bytes unchanged"
 }

@@ -21,6 +21,7 @@ PATH_AFTER = r"(?![A-Za-z0-9_-])"
 ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 QA_NOT_RUN_DETAIL = 'QA did not run: the environment refused its commands (see the pending items of kind "qa not run")'
 QA_NOT_RUN_FACT = "not run: the environment refused it"
+PATH_SEPARATORS = re.compile(r"\s*[,;]\s*")  # a reviewer may join several paths into one `file`
 PIN_PATH = r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)*"  # a repo-relative path the gate can pass unquoted
 PIN_MAX_ARGS = 40  # arguments of one pinned call, so the command stays short
 ACCEPTANCE_CONFLICT_DECISION = (
@@ -133,11 +134,51 @@ def _named(files, low):
         PATH_BEFORE + re.escape(f.translate(ASCII_LOWER)) + ("" if f.endswith("/") else PATH_AFTER), low)]
 
 
+def _paths(file, root):
+    """The paths of a finding's `file`: root removed, split on "," and ";", empty and repeated pieces dropped."""
+    if not isinstance(file, str):
+        return []
+    out = []
+    for piece in PATH_SEPARATORS.split(_without_root(file, root)):
+        if piece and piece not in out:
+            out.append(piece)
+    return out
+
+
+def _owner_of(path, owners):
+    """The first package, in id order, whose files hold the path (ASCII case folded; a "/" file is a folder)."""
+    low = path.translate(ASCII_LOWER)
+    for o in sorted(owners):
+        files = owners[o] if isinstance(owners[o], list) else []
+        for f in files:
+            if not isinstance(f, str) or not f:
+                continue
+            fl = f.translate(ASCII_LOWER)
+            if low == fl or (fl.endswith("/") and low.startswith(fl)):
+                return o
+    return None
+
+
+def _original(f, wp, new_wp, paths, by_owner, unowned, mine):
+    """The finding kept on its (possibly corrected) package, with "scope" and, when corrected, "wp_from"."""
+    corrected = new_wp != wp
+    out = {**f, "wp": new_wp, "scope": sorted(set(by_owner.get(new_wp, []) + unowned + mine))}
+    if corrected or len(paths) > 1:
+        own = by_owner.get(new_wp) or paths
+        out["file"] = own[0] if own else f.get("file")
+        if paths and out["file"] != paths[0]:
+            out.pop("line", None)
+    if corrected:
+        out["wp_from"] = wp
+    return out
+
+
 def split_by_owner(findings, owners, root):
-    """One axis's confirmed findings, each with "fingerprint". A finding whose evidence or fix names files of other
-    packages becomes the original, with "scope" (its own files named), then one part per other owning package in
-    ascending id order, with that package's "wp", "file", "scope" and "split_from", no "line", and its own fingerprint
-    (suffixed -2, -3 ... when taken). A finding that names no other package is returned as the same object."""
+    """One axis's confirmed findings, each with "fingerprint". Its `file` is read path by path. A finding whose wp
+    owns none of its owned paths goes to the owner of the first one ("wp_from" keeps the reviewer's). Every other
+    package that owns a path of `file`, or whose files the evidence or fix names, gets a part in ascending id order,
+    with that package's "wp", "file", "scope" and "split_from", no "line", and its own fingerprint (suffixed -2,
+    -3 ... when taken). A finding with one path, on its owner, that names no other package is the same object."""
     owners = owners if isinstance(owners, dict) else {}
     root = root if isinstance(root, str) else ""
     taken = {f.get("fingerprint") for f in findings if isinstance(f, dict)}
@@ -147,28 +188,44 @@ def split_by_owner(findings, owners, root):
             out.append(f)
             continue
         wp = f.get("wp") if isinstance(f.get("wp"), str) else None
+        paths = _paths(f.get("file"), root)
+        by_owner, unowned = {}, []
+        for path in paths:
+            o = _owner_of(path, owners)
+            (by_owner.setdefault(o, []) if o else unowned).append(path)
+        new_wp = next(iter(by_owner)) if by_owner and wp not in by_owner else wp
         low = _without_root(_text(f.get("evidence")) + "\n" + _text(f.get("fix")), root).translate(ASCII_LOWER)
-        others = {o: _named(owners[o], low) for o in sorted(owners) if o != wp and isinstance(owners[o], list)}
-        others = {o: files for o, files in others.items() if files}
-        if not others:
+        others = {}
+        for o in sorted(owners):
+            if o == new_wp or not isinstance(owners[o], list):
+                continue
+            files = sorted(set(by_owner.get(o, []) + _named(owners[o], low)))
+            if files:
+                others[o] = files
+        if new_wp == wp and not others and len(paths) <= 1:
             out.append(f)
             continue
-        own = _without_root(_text(f.get("file")), root)
-        mine = _named(owners.get(wp) or [], low) if isinstance(owners.get(wp), list) else []
-        out.append({**f, "scope": sorted(set(([own] if own else []) + mine))})
-        for o, files in others.items():
-            scope = sorted(set(files))
-            part = {**f, "wp": o, "file": scope[0], "scope": scope, "split_from": f.get("fingerprint")}
-            part.pop("line", None)
-            base = fp = fingerprint(part)
-            n = 2
-            while fp in taken:
-                fp, n = f"{base}-{n}", n + 1
-            part["fingerprint"] = fp
-            taken.add(fp)
-            out.append(part)
+        mine = _named(owners[new_wp], low) if isinstance(owners.get(new_wp), list) else []
+        out.append(_original(f, wp, new_wp, paths, by_owner, unowned, mine))
+        out.extend(_parts(f, others, taken))
     return out
 
+
+def _parts(f, others, taken):
+    """One part per other owning package: its files, no line, no wp_from, a fingerprint not yet taken."""
+    parts = []
+    for o, scope in others.items():
+        part = {**f, "wp": o, "file": scope[0], "scope": scope, "split_from": f.get("fingerprint")}
+        part.pop("line", None)
+        part.pop("wp_from", None)
+        base = fp = fingerprint(part)
+        n = 2
+        while fp in taken:
+            fp, n = f"{base}-{n}", n + 1
+        part["fingerprint"] = fp
+        taken.add(fp)
+        parts.append(part)
+    return parts
 
 def qa_environment_blocked(qa):
     """QA's report says the environment, not the code, kept it from validating."""

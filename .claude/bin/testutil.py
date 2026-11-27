@@ -119,7 +119,9 @@ if first:
     open(os.path.join(os.environ["FAKE_LOG_DIR"], once), "w").close()
     wp = os.environ[once]
     if agent == "reviewer":
-        values.update(status="FAIL", findings=[{"severity": "high", "wp": wp, "file": "src/a.py", "problem": "p",
+        # a file the WP owns in the tests' manifests, so the split by owner keeps the finding on it (design 0035)
+        owned = {"WP-02": "src/b/x.py", "WP-03": "src/c.py"}.get(wp, "src/a.py")
+        values.update(status="FAIL", findings=[{"severity": "high", "wp": wp, "file": owned, "problem": "p",
                                                  "evidence": "e", "fix": "f", "if_skipped": "s"}])
     else:
         values.update(status="FAIL", defects=[{"id": "D1", "severity": "high", "wp": wp, "kind": "implementation",

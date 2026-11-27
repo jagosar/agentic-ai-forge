@@ -1,144 +1,105 @@
-# Architecture: the hook and agentic.py resolve the same root inside a git worktree (agentic-flow 2.22.2)
+# Architecture: a finding goes to the package that owns its file, path by path (issue 149; agentic-flow 2.22.3)
 Type: fix · Size: standard
 
 ## 1. Goal
 
-A field session in a git worktree (2026-11-26, a PowerShell project) could not start native `/implement`: `hooks-check` exited 3, "the guardrail hook did not run for this call". Claude Code keeps `CLAUDE_PROJECT_DIR` at the main checkout after the session enters a worktree. It documents that the hook's stdin JSON `cwd` is the worktree root (https://code.claude.com/docs/en/worktrees.md). The hook command `python3 "$CLAUDE_PROJECT_DIR/.claude/bin/hook.py"` therefore ran the main checkout's guard, whose root was the main checkout. Its heartbeat, claims, ledger, manifest and git checks all belonged to the main checkout. `agentic.py` commands run from the worktree used the worktree as their root. Writes were broken too, though less visibly: a worktree under `.claude/worktrees/` is, for the main checkout's guard, a path under `.claude/`, which no flow agent may write.
+A 2.22.2 field run (xmm-test-tool) recorded two Standards findings with incoherent owners. In the first, the reviewer put `wp: WP-01` on a line of `XMM.RemoteStream.psm1:30`, a file WP-03 owns. `split_by_owner` kept the original on WP-01 with its line and added a part on WP-03 without one. The line was pinned by an acceptance test, so `split_pinned` (which matches on path and line) pinned only the WP-01 original. The WP-03 part stayed a normal finding, open to a fix the acceptance test forbids. In the second, the reviewer joined three paths of three other zones into one comma-separated `file` under WP-01. `split_by_owner` read it as one path, so nothing reached the real owners.
 
-After this fix, `hook.py` reads the call's `cwd`. When a call of the session's main thread has its `cwd` in a linked worktree of the same repository that has the flow installed, `hook.py` runs that worktree's guard with that worktree as its root, and records the choice for the session. An agent's call (one with `agent_id`) is judged in the root the main thread chose for its session, never by its own `cwd`, so an agent that changes directory cannot change guard; a fallback agent (`AGENTIC_WP`) keeps the root its launcher set. `core.ROOT` follows the same rule when `CLAUDE_PROJECT_DIR` names the main checkout but the running `agentic.py` lives in the worktree. Native `/implement` then works in a worktree with no move to the main folder and no fallback.
+After this fix, `split_by_owner` reads `file` as a list of paths (split on `,` and `;`). It gives the finding to the package that owns its first owned path when the reviewer's `wp` owns none of them, and adds one part per other owning package, as it already does for paths the evidence names. The finding then sits on the owner of its file, with its line, so `split_pinned` pins the right package. Parts on other files are fixed as before: the pin belongs to one file and one line (user's choice). Both engines change the same way.
 
 ## 2. Scope
 
 ### Included
 
-- `.claude/bin/hook.py`: `linked_worktree(start, project)`; the root and the guard chosen from the main thread's stdin `cwd` and remembered per session; agents pinned to it; stdin handed on unchanged.
-- `.claude/bin/core.py`: `ROOT` is the worktree when `CLAUDE_PROJECT_DIR` names another checkout of the same repository and the running script lives in a linked worktree.
-- `.claude/bin/guardrail.py`: the worktree hint of the hook diagnosis also says to update the flow in the checkout the session started from.
-- Worktrees: any linked worktree of the same repository, under `.claude/worktrees/` or elsewhere (`git worktree add ../folder`, which `sessions-check` recommends). User's choice.
-- Release 2.22.2: notes, `how-it-works.md`, the budget, the version pin of `test_acceptance_v222.py`.
+- `findings.split_by_owner`: `file` normalised into paths; the `wp` corrected to the owner of the file when it owns none of its paths; parts for every other package that owns a path of `file` or one named in the evidence or fix; `scope` always a list of single paths.
+- The workflow's mirror `splitByOwner` in `agentic-implement.js`, the same rules.
+- Three conformance scenarios (Annex A).
+- Release 2.22.3.
 
 ### Excluded (non-goals)
 
-- Running git to find worktrees: the rule reads `.git` files only.
-- A worktree without the flow (no `.claude/bin/agentic.py`), a worktree of another repository, a submodule: the guard behaves as today.
-- Changing `.claude/settings.json`'s hook command.
-- A main checkout whose `hook.py` predates this release. It still runs its old logic; the diagnosis hint names the remedy.
-- `sessions-check` behaviour and message.
-- `waiting.py` (the other never-owned hook script, `.claude/bin/waiting.py:106-112`) still roots on `CLAUDE_PROJECT_DIR`: in a worktree its waiting record lands in the main checkout. It only observes; left for a later release.
+- Pinning a part on another file because its original is pinned (user's choice: a pin is one file and one line).
+- QA defects (they carry no `file`), and the verification's attribution of failures (`verification.attribute`, issue 148).
+- Changing how the reviewers report `file`: the normalisation copes with what they send.
+- A finding whose `file` no package owns (for example the acceptance zone): its `wp` stays as given.
 
 ## 3. Stack
 
-Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workflow.mjs`. No package manager, no new dependency. `git` (for the tests' worktrees).
+Python 3.9+ (standard library only) and the Node.js the CI uses for `test_workflow.mjs`. No new dependency.
 
 - Unit and acceptance: `python3 -m unittest discover -s .claude/bin -p "test_*.py"`
-- The repository's suites CI also runs: `python3 -m unittest discover -s acceptance`, `python3 -m unittest discover -s qa`
-- The workflow: `node .claude/bin/test_workflow.mjs`
+- The workflow against the conformance scenarios: `node .claude/bin/test_workflow.mjs`
+- The repository's own suites, which CI also runs: `python3 -m unittest discover -s acceptance` and `python3 -m unittest discover -s qa`
 - Quality limits: `python3 .claude/bin/agentic.py quality`
 
 ## 4. Repository structure
 
 ```
-.claude/bin/hook.py                      by hand (never owned), committed first: linked_worktree, choose_root, the session's root
-.claude/bin/test_worktree_root.py        WP-01  new: unit cases of linked_worktree and choose_root
-.claude/bin/core.py                      WP-02  project_root(); ROOT = project_root()
-.claude/bin/guardrail.py                 WP-02  the worktree hint's text
-.claude/bin/test_core_root.py            WP-02  new: unit cases of project_root
-docs/how-it-works.md                     WP-03  one paragraph on worktrees
-.claude-plugin/plugin.json               WP-03  2.22.2
-.claude/bin/upgrade.py                   WP-03  NOTES["2.22.2"]
-.claude/flow-budget.json                 WP-03
-.claude/bin/test_acceptance_v222.py      WP-03  its version pin (line 229): 2.22.2
-.claude/bin/test_worktree_hook.py        AT
-.claude/flow-history.json                by hand: regenerated as the last commit
+.claude/bin/findings.py                  WP-01  split_by_owner, _paths, _owner_of, PATH_SEPARATORS
+.claude/bin/test_owner_wp.py             WP-01  new: unit cases
+.claude/workflows/agentic-implement.js   WP-01  splitByOwner and its helpers, the same rules
+.claude/bin/conformance.json             WP-01  three scenarios (Annex A)
+docs/how-it-works.md                     WP-02  the split paragraph
+.claude-plugin/plugin.json               WP-02  2.22.3
+.claude/bin/upgrade.py                   WP-02  NOTES["2.22.3"]
+.claude/flow-budget.json                 WP-02
+.claude/bin/test_acceptance_v222.py      WP-02  its version pin (line 229): 2.22.3
+.claude/bin/test_owner_split_v2.py       AT
+.claude/flow-history.json                by hand (the person executing the plan): regenerated as the last commit
 ```
 
 ## 4b. Existing code context
 
 | What an implementer needs to know | Where it is (`file:lines`) | Pattern or rule | Source |
 |---|---|---|---|
-| The hook launcher: chooses `agentic.py` from `CLAUDE_PROJECT_DIR` or its own location; fails closed (exit 2) when it cannot choose; runs it with `runpy` and `argv = [script, "hook"]` | `.claude/bin/hook.py:1-29` | Standard library only, Python 3.9, no annotations, never imports `agentic.py` at module level | read |
-| `hook.py` is never owned by any package, and `validate` rejects a plan that gives it to one | `.claude/bin/core.py:50-54`, `.claude/bin/core.py:296-302` | It is edited by hand in this release | read |
-| `ROOT` is `CLAUDE_PROJECT_DIR`, else `SOURCE_ROOT` (two levels above `core.py`), computed at import | `.claude/bin/core.py:18-24` | Every module reads `core.ROOT`; it must stay a module constant | read |
-| `root_drift` refuses a command whose `CLAUDE_PROJECT_DIR` names another repository while the cwd is outside it; a worktree under `<main>/.claude/worktrees/` is inside main, so today it passes and acts on main | `.claude/bin/core.py:174-186` | With the new `ROOT` it sees `SOURCE_ROOT == ROOT` and returns None | read |
-| The guard reads the hook's JSON with `compat.read_stdin_text()`, which reads `sys.stdin.buffer` | `.claude/bin/guardrail.py:639-652`, `.claude/bin/compat.py:112-114` | `hook.py` replaces `sys.stdin` with a `TextIOWrapper` over a `BytesIO` of the bytes it read | read |
-| A write outside `ROOT` is refused; a path under `.claude/` is refused (`flow_path_refused`) | `.claude/bin/guardrail.py:322-347`, `.claude/bin/core.py:304-306` | Why every write in `<main>/.claude/worktrees/<n>/` is refused today | read |
-| The heartbeat lives in `ROOT/.claude/state/hook-seen.json` | `.claude/bin/guardrail.py:382-397` | | read |
-| The diagnosis: `_worktree` (git), heartbeats of ROOT, main and cwd's top level, the "different project roots" hint | `.claude/bin/guardrail.py:509-532`, `.claude/bin/guardrail.py:545-560` | Only the hint's text changes; keep the words `different project roots` and `hook-seen.json` (`.claude/bin/test_hook_diagnosis.py:141-143`) | read |
-| A test that creates a worktree under `.claude/worktrees/` and runs `hooks-check` there | `.claude/bin/test_hook_diagnosis.py:120-145` | Copy its git setup (`GIT`, commit, `git worktree add`) | read |
-| A test copy of the flow in a temporary git repo (`hook_copy`) | `.claude/bin/test_hook_path.py:27-40` | The AT and WP-01 build repos with `.claude/bin` committed, so a worktree has the flow | read |
-| Running `hook.py` with a payload and `AGENTIC_WP` | `.claude/bin/test_guardrail.py:305-321` | | read |
-| Install copies `.claude/bin/<name>.py` for the names in `INSTALL_BIN` (`hook` included) | `.claude/bin/installer.py:19-30` | No new module: nothing to add | read |
-| The settings run the hook through `$CLAUDE_PROJECT_DIR/.claude/bin/hook.py`, pinned by a test | `.claude/bin/test_definitions.py:349-351` | Unchanged | read |
-| Release notes go newest first, `2.22.1` at the top of the recent block | `.claude/bin/upgrade.py:156-165` | `2.22.2` right before `2.22.1` | read |
-| `test_acceptance_v222.py` pins the plugin version on line 229 | `.claude/bin/test_acceptance_v222.py:226-229` | `"2.22.1"` → `"2.22.2"` | read |
-| `test_pinned_conflict.py` (2.22.1) checks the version is ≥ 2.22.1 and that `"2.22.1"` is followed by `"2.22.0"` in `NOTES` | `.claude/bin/test_pinned_conflict.py:193-200` | Still true with `2.22.2` placed before `2.22.1` | read |
-| Claude Code keeps `CLAUDE_PROJECT_DIR` at the main checkout and gives the worktree root as the stdin `cwd`; whether Bash commands get `CLAUDE_PROJECT_DIR` is not documented | https://code.claude.com/docs/en/worktrees.md | The field diagnosis showed `project_dir = null` in a Bash call. The AT reproduces these documented values; no real `claude --worktree` payload was captured | inferred |
-| A subagent's hook payload carries its parent session's `session_id` (with its own `agent_id`) | not documented; design 0024 calls the gatekeeper's session id "not verified" | If it does not, a native agent falls back to the main checkout's root (today's behaviour: its writes in the worktree are refused, a visible stop) | inferred |
+| `split_by_owner` today: parts only for packages whose files the evidence or fix names; the original gets `scope` (its `file` plus its own named files); parts drop `line`, get the owner's spelling of the path, `split_from` and a fresh fingerprint suffixed `-2`, `-3` when taken; an unsplit finding is the same object | `.claude/bin/findings.py:136-167` | Keep every one of these properties | read |
+| `_without_root` (root removed, `\` read as `/`, ASCII case folded for the root only) and `_named` (whole-path match in lowered text, a `/` path names a directory) | `.claude/bin/findings.py:114-133` | Reuse both | read |
+| `pin_path` and `split_pinned` match on the finding's `file` (root removed) and `line` | `.claude/bin/findings.py:198-248` | Unchanged: a finding on the right owner with its line is pinned as it is | read |
+| The engines split each axis's confirmed findings once, after the verifiers | `.claude/bin/pipeline.py:524`, `.claude/workflows/agentic-implement.js:670-678` | Unchanged call sites | read |
+| `owners` is `{wp: [files]}` and `root` the repo root, both in `pipeline-plan`'s plan | `.claude/bin/launch.py:684` | | read |
+| The workflow's mirror and its helpers (`lowAscii`, `noRoot`, `pathRe`, `named`, `str`, `splitByOwner`) | `.claude/workflows/agentic-implement.js:179-218` | Mirror the new Python helpers here | read |
+| Unit tests of `split_by_owner` that must keep passing (same object, owner's spelling, `WP-99` with no file, an unowned `/abs/x.py`, bad shapes) | `.claude/bin/test_owner_split.py:22-69` | None of them has a `wp` that owns none of an owned `file`: they stay valid | read |
+| More split tests (the fix prompt carries the part's `wp`, `file` and `scope`; root `C:/repo`) | `.claude/bin/test_fix_routing.py:120-160` | Must keep passing | read |
+| The conformance scenario of a split | `.claude/bin/conformance.json:1924-1966` | Annex A copies its shape | read |
+| The workflow may grow to 967 lines (stored 937, growth 30) with no new line over 120 characters (64 stored) | `.claude/quality-baseline.json`, `.claude/bin/quality.py:232-235` | | read |
+| Release notes: newest first, `2.22.2` at the top of the recent block | `.claude/bin/upgrade.py:156-164` | `2.22.3` right before `2.22.2` | read |
+| `test_acceptance_v222.py` pins the plugin version | `.claude/bin/test_acceptance_v222.py:226-229` | `"2.22.2"` → `"2.22.3"` | read |
 
-What must NOT change: the hook's behaviour outside a linked worktree (same guard, same root, same exit codes); `settings.json`; the import budget of the hook (`test_hook_path.py`, `test_lean_hook.py`).
+What must NOT change: a finding whose `wp` owns its `file` and whose evidence names no other package is returned as the same object; a finding that is split only because its evidence names other packages keeps its `file` exactly as the reviewer wrote it (root and backslashes included) and its `line`, as today; the fingerprint of the original; the parts' fields and order.
 
 ## 5. Data model
 
 ```python
-# hook.py
-GITDIR_PREFIX = "gitdir:"   # the first line of a linked worktree's .git file
-WORKTREES_DIR = "worktrees"  # a linked worktree's git dir is <common>/worktrees/<name>
-FLOW_ENTRY = Path(".claude") / "bin" / "agentic.py"
-SESSION_ROOTS = Path(".claude") / "state" / "worktree-roots.json"  # under the project (CLAUDE_PROJECT_DIR)
-SESSION_ROOTS_MAX = 20  # sessions remembered; the oldest are dropped
+PATH_SEPARATORS = re.compile(r"\s*[,;]\s*")  # a reviewer may join several paths into one `file`
 ```
 
-`<project>/.claude/state/worktree-roots.json`: `{"<session_id>": {"root": "<absolute path>", "ts": <epoch seconds>}}`, at most `SESSION_ROOTS_MAX` entries (the newest by `ts`). It lives under `.claude/state/`, which no agent may write (`.claude/bin/core.py:50-54`). Every other piece of state lives in `<root>/.claude/state/`, as for any root.
+A finding after the split may carry `"wp_from": "<the reviewer's wp>"` when its `wp` was corrected. `scope`, whenever present, is a list of single paths.
 
 ## 6. Contracts between modules
 
-### C1 · `hook.linked_worktree(start, project) -> Path | None` (hook.py; used by core.py and the tests)
+### C1 · `findings.split_by_owner(findings, owners, root) -> list` (WP-01; mirrored in the workflow by WP-01)
 
-- `start`, `project`: `str` or `Path`. Never raises; on `OSError` or `ValueError` it returns `None`.
-- From `Path(start).resolve()` up through its parents, the first directory `d` holding a `.git` entry decides:
-  - `.git` is a directory → `None` (a main checkout).
-  - `.git` is a file whose first line starts with `gitdir:` → `gd` = the rest, stripped, resolved against `d` when relative. When `gd.parent.name` is not `worktrees` → `None` (a submodule). Otherwise `common = gd.parent.parent`.
-  - Anything else → `None`.
-- No `.git` entry anywhere up the path → `None`.
-- `project`'s common git dir: `project/.git` when it is a directory; when it is a file, the `common` computed from it the same way. When it has none → `None`.
-- Returns `d` (resolved) when `common == project's common dir` (both resolved) and `d / ".claude/bin/agentic.py"` is a file; `None` otherwise.
+For each finding `f` that is a dict (anything else passes through unchanged, in place):
 
-### C2 · `hook.choose_root(raw, project, env) -> Path` (hook.py)
+1. `paths`: `_without_root(f["file"], root)` when `file` is a string, split with `PATH_SEPARATORS`, empty pieces dropped, repeats (exact string) dropped, order kept. `[]` when `file` is not a string.
+2. `_owner_of(path, owners)`: the first package id in ascending order whose files contain the path, compared ASCII-lowercased: equal to a file, or under a file ending in `/`. `None` when no package owns it. Owner values that are not lists are skipped (`test_owner_split.py:62` passes `{"WP-02": "src/b/"}`).
+3. `wp`: `f["wp"]` when it is a string, else `None`. When at least one path has an owner and `wp` owns none of the paths, `new_wp` is the owner of the first owned path (in `paths` order) and the finding is **corrected**; otherwise `new_wp = wp`.
+4. `others`: for each package `o != new_wp` in ascending id order, the paths of `paths` it owns plus the files of `o` that `_named` finds in the evidence and fix (today's rule). Packages with none are left out.
+5. When the finding is not corrected, `others` is empty and `len(paths) <= 1`: append `f` itself and continue (same object).
+6. The original: `{**f, "wp": new_wp, "scope": sorted(set(<paths owned by new_wp> + <unowned paths> + <new_wp's files named in the evidence>))}`. Its `file` and `line`: when the finding is not corrected and `len(paths) <= 1`, both stay exactly as the reviewer wrote them (today's behaviour). Otherwise `file` becomes the first path of `paths` owned by `new_wp`, else `paths[0]`; `line` is kept only when that new `file` equals `paths[0]`, and removed otherwise. When corrected, add `"wp_from": wp` (`null` in JSON when the reviewer's `wp` was not a string; both engines write the key).
+7. Parts, as today: for each `o` in `others`, `{**f, "wp": o, "file": scope[0], "scope": scope, "split_from": f["fingerprint"]}` with `scope = sorted(set(files))` (the owner's spelling for named files, the finding's spelling for paths of `file`), no `line`, `wp_from` removed, and a fresh fingerprint (suffixed `-2`, `-3` ... when taken).
+8. Never raises on odd shapes (non-string fields, owners not a dict, a file list).
 
-- `raw`: the bytes of stdin. `project`: today's root (`CLAUDE_PROJECT_DIR`, else two levels above `hook.py`). `env`: a mapping (the process environment; tests pass a dict).
-- The payload: `json.loads(raw.decode("utf-8"))` when it is a dict; any decoding error or other shape → `Path(project)`. `cwd`, `session_id` and `agent_id` are read only when they are non-empty strings.
-- `env.get("AGENTIC_WP")` set → `Path(project)` (a fallback agent: its launcher already set `CLAUDE_PROJECT_DIR` to the run's root, `.claude/bin/launch.py:236`).
-- `agent_id` present (a subagent of the session) → the root remembered for `session_id` when it is still `linked_worktree(root, project) == root`; otherwise `Path(project)`. The agent's own `cwd` is never read.
-- Otherwise (the main thread): `root = linked_worktree(cwd, project)` when `cwd` is given, else `None`; then `remember(project, session_id, root)` when `session_id` is given; returns `root` or `Path(project)`.
-- `remember(project, session_id, root)`: writes `SESSION_ROOTS` under `project` with that session's entry set to `{"root": str(root), "ts": time.time()}` when `root` is not `None`, or removed when it is; it keeps the newest `SESSION_ROOTS_MAX`; creates `<project>/.claude/state/` when missing (`mkdir(parents=True, exist_ok=True)`: a main checkout used only through worktrees never had one); writes a temporary file beside it named with the process id (`worktree-roots.json.<pid>.tmp`) and `os.replace`s it; an entry whose `root` is unchanged is not rewritten (its `ts` stays: the file is written only when a session's root changes); any `OSError` or `ValueError` is ignored (an agent then falls back to `project`, today's behaviour).
-- `remembered(project, session_id) -> Path | None`: the entry's `root`, or `None` when the file, the entry or its shape is missing.
+### C2 · `splitByOwner(findings)` (agentic-implement.js, WP-01)
 
-### C3 · `hook.main()` (the launcher)
-
-1. `raw = sys.stdin.buffer.read()`.
-2. `project` as today; `root = choose_root(raw, project, os.environ)`.
-3. When `root` differs from `Path(project)`: `os.environ["CLAUDE_PROJECT_DIR"] = str(root)`. Otherwise the environment is left as it is.
-4. `sys.stdin = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8")`; `sys.argv = [str(script), "hook"]` with `script = root / ".claude/bin/agentic.py"`; `runpy.run_path(str(script), run_name="__main__")`.
-- `runpy.run_path` leaves `hook.py`'s own folder (the main checkout's `.claude/bin`) as `sys.path[0]`; the worktree's `agentic.py` and `core.py` insert their own folder first (`.claude/bin/agentic.py:79`, `.claude/bin/core.py:15`), so `import hook` inside the worktree's `core` loads the worktree's copy.
-- Steps 1-2 inside the existing `try`: any exception prints today's `[agentic hook.py] cannot choose the guard, blocked for safety: ...` and exits 2.
-
-### C4 · `core.project_root() -> Path` (core.py); `ROOT = project_root()`
-
-- `env = os.environ.get("CLAUDE_PROJECT_DIR")`.
-- When `env` is set and `hook.linked_worktree(SOURCE_ROOT, env)` equals `SOURCE_ROOT.resolve()`: `SOURCE_ROOT`.
-- Otherwise: `Path(env or SOURCE_ROOT)` (today's value).
-- `core` imports `linked_worktree` from the sibling `hook` module inside `try: from hook import linked_worktree` / `except ImportError: linked_worktree = None`; when it is `None`, `project_root()` returns today's value. An older `hook.py` beside a newer `core.py` (an `install` that kept a user-edited `hook.py`, `.claude/bin/installer.py:209-214`, or a half-done upgrade) must never stop `agentic.py hook` before `guardrail.hook()`'s `try`: that would exit 1, which Claude Code does not treat as a block (`.claude/bin/agentic.py:82-89`). `hook.py` has no side effect at import.
-
-### C5 · The diagnosis hint (guardrail.py `_hints`)
-
-The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the hook and this command see different project roots (a git worktree?). The hook comes from the checkout the session started in: update the flow there (agentic.py install), or start the session in this folder`.
+The same rules, reading `plan.owners` and `plan.root` as today. Helpers mirrored: `pathsOf(file)` (with `PATH_SEPARATORS = /\s*[,;]\s*/`), `ownerOf(path, owners)`.
 
 ## 7. Conventions
 
 - English for code, comments and docs; the repository's existing style.
-- Standard library only. `hook.py` stays Python 3.9, no annotations, no flow import.
-- No line over 120 characters; functions ≤ 60 lines; nesting ≤ 4 (`agentic.py quality`).
-- Every literal that decides behaviour is a named module constant with a comment.
+- Standard library only; `findings.py` keeps no flow import.
+- No line over 120 characters; functions ≤ 60 lines; nesting ≤ 4 (`agentic.py quality`). Split `split_by_owner` into helpers if it would pass 60 lines.
+- A comment above each JS mirror names the Python function.
 - Docs and notes name no flow version outside `upgrade.NOTES` and `plugin.json`.
 - Commits: `type: summary` in lowercase, ending with the session's attribution lines.
 
@@ -146,160 +107,166 @@ The worktree hint becomes: `the hook ran, but wrote its heartbeat in <path>: the
 
 ### Acceptance criteria
 
-- AC-001 · In a worktree under `.claude/worktrees/`, the hook writes its heartbeat in the worktree and `hooks-check` passes (the bug)
-  - Scenario: a temporary git repo with `.claude/bin` (a copy of this checkout's, without tests), `.claude/settings.json`, `.claude/agents` and `architecture.md` holding `test_agentic.MANIFEST`, all committed; `git worktree add <repo>/.claude/worktrees/w -b w`.
-  - Action: run `<repo>/.claude/bin/hook.py` with `CLAUDE_PROJECT_DIR=<repo>`, cwd `<repo>` and stdin `{"tool_name": "Bash", "tool_input": {"command": "ls"}, "session_id": "s1", "cwd": "<repo>/.claude/worktrees/w"}`; then, from the worktree, `python3 .claude/bin/agentic.py hooks-check` with `CLAUDECODE=1` and no `CLAUDE_PROJECT_DIR`.
-  - Expected: the hook exits 0; `<worktree>/.claude/state/hook-seen.json` exists with `tool` `Bash`; `hooks-check` exits 0 with `"mode": "live"`.
-  - Must not: `<repo>/.claude/state/hook-seen.json` created or changed.
-  - Check: `test_worktree_hook.py`, AC-001 tests.
+- AC-001 · A finding on a file its `wp` does not own goes to the file's owner, with its line (the bug, case 1)
+  - Scenario: `owners = {"WP-01": ["src/a.py"], "WP-03": ["src/c.py"]}`, root `""`; one finding with fingerprint (`with_fingerprints`) of `{"axis": "standards", "tier": "reflex", "rule": "Line length", "wp": "WP-01", "file": "src/c.py", "line": 3, "problem": "P", "evidence": "src/c.py:3 is 130 characters", "fix": "split it"}`.
+  - Action: `findings.split_by_owner([f], owners, "")`.
+  - Expected: one finding, `wp` `WP-03`, `wp_from` `WP-01`, `file` `src/c.py`, `line` 3, `scope` `["src/c.py"]`, the same `fingerprint`.
+  - Must not: a second finding (no part); `split_from` on the result.
+  - Check: `test_owner_split_v2.py`, AC-001 tests.
   - WP: WP-01
-- AC-002 · A package's write in the worktree is judged against the worktree's manifest and paths
-  - Scenario: the repo of AC-001; the worktree's architecture.md is the committed one.
-  - Action: (a) the fallback: `hook.py` with `AGENTIC_WP=WP-01`, `CLAUDE_PROJECT_DIR=<worktree>` (what the launcher sets) and a `Write` payload for `<worktree>/src/a.py`, then for `<worktree>/src/c.py`, each with `"cwd": "<worktree>"` and `content` `"x = 1\n"`. (b) the native engine: with `CLAUDE_PROJECT_DIR=<repo>`, first a main-thread call (AC-001's payload, `session_id` `s1`), then an agent call `{"tool_name": "Bash", "tool_input": {"command": "python3 .claude/bin/agentic.py claim WP-01"}, "session_id": "s1", "agent_id": "a1", "agent_type": "implementer", "cwd": "<worktree>"}`, then the two `Write` payloads with the same `session_id`, `agent_id` and `agent_type`.
-  - Expected: in (a) and (b), the write to `src/a.py` exits 0 and the write to `src/c.py` exits 2 with `does not own src/c.py` in stderr; in (b) `<worktree>/.claude/state/claims.json` names `a1`.
-  - Must not: either stderr containing `.claude/worktrees`.
-  - Note: (a) runs the worktree's `hook.py` (the launcher points `CLAUDE_PROJECT_DIR` at the worktree) and already passes today: it guards against a regression; (b) runs `<repo>`'s `hook.py` and is red today.
-  - Check: `test_worktree_hook.py`, AC-002 tests.
+- AC-002 · The pin reaches the owner, and no fix is attempted, in both engines
+  - Scenario: Annex A scenario "a pinned finding on a file its wp does not own goes to the owner".
+  - Action: the fallback engine (`test_pipeline.run_scenario`, and for the full result a helper like `full_result` in `.claude/bin/test_pinned_conflict.py:40-45`) and the native engine (`node .claude/bin/test_workflow.mjs --dump`).
+  - Expected: the gates contain `pinned src/c.py:3` once; `fix_cycles` 0; `result` `REVIEW`; `pending` types `["acceptance conflict"]`, and that item's `wp` is `WP-03`; `review.standards.confirmed` is `[]`. Both engines agree on result, fix_cycles, pending, gates, gate_calls, agents and prompts.
+  - Must not: an implementer call labelled `(fix)`; a confirmed finding on `WP-03`.
+  - Check: `test_owner_split_v2.py`, AC-002 tests.
   - WP: WP-01
-- AC-003 · A worktree outside the main checkout works the same way
-  - Scenario: the repo of AC-001 plus `git worktree add <tmp>/outside -b o`, `<tmp>` another temporary folder.
-  - Action: AC-001's hook call with `"cwd": "<tmp>/outside"`.
-  - Expected: `<tmp>/outside/.claude/state/hook-seen.json` exists; the main checkout's does not.
-  - Must not: the main checkout's heartbeat.
-  - Check: `test_worktree_hook.py`, AC-003 test.
+- AC-003 · A `file` with several paths is split by owner, `scope` always a list (case 2)
+  - Scenario: `owners = {"WP-01": ["src/a.py"], "WP-02": ["src/b/"], "WP-03": ["src/c.py"]}`; a finding of `wp` `WP-01`, `line` 7, `file` `"src/c.py, src/b/x.py; acceptance/t.py"`, evidence `"e"`, fix `"f"`.
+  - Action: `findings.split_by_owner([f], owners, "")`, and the Annex A scenario "a finding whose file lists several paths is split by owner" in both engines.
+  - Expected (unit): two findings. The original: `wp` `WP-03`, `wp_from` `WP-01`, `file` `src/c.py`, `line` 7, `scope` `["acceptance/t.py", "src/c.py"]`. The part: `wp` `WP-02`, `file` `src/b/x.py`, `scope` `["src/b/x.py"]`, `split_from` the original's fingerprint, no `line`, no `wp_from`. (Engines): one fix cycle with fix calls for `WP-02` and `WP-03` and none for `WP-01`; both engines agree as in AC-002.
+  - Must not: any `scope` entry containing `,` or `;`; a finding left on `WP-01`.
+  - Check: `test_owner_split_v2.py`, AC-003 tests.
   - WP: WP-01
-- AC-004 · Outside a linked worktree of the same repository with the flow, nothing changes
-  - Scenario: the repo of AC-001; another git repo `<other>` with a worktree `<other>/wt` holding a copy of `.claude/bin`; a worktree `<repo>/.claude/worktrees/bare` from which `.claude/bin/agentic.py` was deleted; a submodule-like folder whose `.git` file says `gitdir: ../.git/modules/m`.
-  - Action: `hook.choose_root(raw, <repo>, {})` (main-thread payloads, no `session_id`) for `cwd` = `<repo>`, `<repo>/src`, `<other>/wt`, `<repo>/.claude/worktrees/bare`, the submodule folder, a folder with no git, and for `raw` = `b"not json"`, `b"[]"`, `b'{"cwd": 3}'`; and `hook.py` run with `AGENTIC_WP=WP-01` and stdin `not json`.
-  - Expected: every `choose_root` call returns `<repo>`; `choose_root` with `cwd` = `<repo>/.claude/worktrees/w/src` returns the `w` worktree. The `hook.py` run exits 2 with `guardrail error, blocked for safety` in stderr (today's answer).
-  - Must not: an exception from `choose_root` or `linked_worktree`.
-  - Check: `test_worktree_hook.py`, AC-004 tests.
+- AC-004 · A part on another file is fixed even when the original's line is pinned
+  - Scenario: Annex A scenario "a part on another file is fixed although the original is pinned".
+  - Action: both engines.
+  - Expected: `pinned src/a.py:3` once; `pending` types `["acceptance conflict"]` with `wp` `WP-01`; one fix cycle with a `WP-03 (fix)` call and no `WP-01 (fix)` call; both engines agree.
+  - Must not: the `WP-03` part in pending.
+  - Check: `test_owner_split_v2.py`, AC-004 tests.
   - WP: WP-01
-- AC-008 · An agent cannot change guard by changing directory
-  - Scenario: the repo of AC-001 with a second worktree `<repo>/.claude/worktrees/x -b x`; with `CLAUDE_PROJECT_DIR=<repo>`, a main-thread call of session `s1` with `cwd` = the `w` worktree.
-  - Action: (a) AC-002 (b)'s claim call (`agent_id` `a1`, `agent_type` `implementer`, `AGENTIC_WP` unset), then a call of the same agent with `cwd` = `<repo>/.claude/worktrees/x` and a `Write` for `<repo>/.claude/worktrees/x/src/a.py`; (b) an agent call of a session with no main-thread call (`session_id` `s2`) with `cwd` = the `w` worktree; (c) `AGENTIC_WP=WP-01`, `CLAUDE_PROJECT_DIR=<repo>` and `cwd` = the `w` worktree; (d) `choose_root` for (a), (b) and (c).
-  - Expected: (a) exits 2 with `you cannot write outside the repo` (judged in `w`); `<repo>/.claude/worktrees/x/.claude/state/` has no `hook-seen.json`. (d) returns the `w` worktree for (a) and `<repo>` for (b) and (c). `<repo>/.claude/state/worktree-roots.json` holds `s1` with the `w` worktree's root.
-  - Must not: the `x` worktree's guard judging an agent of `s1`; an agent call writing `worktree-roots.json`.
-  - Check: `test_worktree_hook.py`, AC-008 tests.
+- AC-005 · What owned its file before is unchanged
+  - Scenario: `owners` of AC-003.
+  - Action: `split_by_owner` on (a) a finding of `WP-01` on `src/a.py` with evidence `"e"`; (b) `WP-01` on `/abs/x.py` (no owner), evidence `"e"`; (c) `WP-99` with `file` `None` and evidence `src/c.py`; (d) `WP-01` with `file` `["src/c.py"]` (not a string), evidence `"e"`.
+  - Expected: (a), (b) and (d) are returned as the same objects; (c) gives `[("WP-99", []), ("WP-03", ["src/c.py"])]` as `(wp, scope)` pairs, as today.
+  - Must not: `wp_from` on any of them.
+  - Check: `test_owner_split_v2.py`, AC-005 test.
   - WP: WP-01
-- AC-009 · An older `hook.py` beside the new `core.py` keeps today's root and the guard still blocks
-  - Scenario: the repo of AC-001 whose `.claude/bin/hook.py` is replaced by the version of commit `0c5928b` (`git show 0c5928b:.claude/bin/hook.py` in this repository; it has no `linked_worktree`), uncommitted.
-  - Action: `python3 -c "import sys; sys.path.insert(0, '<repo>/.claude/bin'); import core; print(core.ROOT)"` with `CLAUDE_PROJECT_DIR=<repo>`; then `python3 <repo>/.claude/bin/agentic.py hook` with `AGENTIC_WP=WP-01`, `CLAUDE_PROJECT_DIR=<repo>` and a `Write` payload for `<repo>/src/c.py`.
-  - Expected: the first prints `<repo>` and exits 0; the second exits 2 with `does not own src/c.py`.
-  - Must not: an `ImportError` traceback; an exit of 1 from the hook.
-  - Check: `test_worktree_hook.py`, AC-009 test.
-  - WP: WP-02
-- AC-005 · `core.ROOT` is the worktree when `CLAUDE_PROJECT_DIR` names the main checkout but the script lives in the worktree
-  - Scenario: the repo and worktree of AC-001.
-  - Action: `python3 -c "import sys; sys.path.insert(0, '<dir>/.claude/bin'); import core; print(core.ROOT)"` run (a) with `<dir>` = the worktree, `CLAUDE_PROJECT_DIR=<repo>`; (b) with `<dir>` = `<repo>`, `CLAUDE_PROJECT_DIR=<repo>`; (c) with `<dir>` = the worktree and no `CLAUDE_PROJECT_DIR`; (d) with `<dir>` = a copy of `.claude/bin` outside any repo, `CLAUDE_PROJECT_DIR=<repo>`.
-  - Expected: (a) the worktree; (b) `<repo>`; (c) the worktree; (d) `<repo>` (each compared resolved).
-  - Must not: (a) printing `<repo>`.
-  - Check: `test_worktree_hook.py`, AC-005 tests.
-  - WP: WP-02
-- AC-006 · The diagnosis says where to update the flow
-  - Scenario: `test_hook_diagnosis.py`'s worktree setup (the worktree's heartbeat absent, the main one fresh).
-  - Action: `hooks-check` from the worktree with `CLAUDECODE=1`.
-  - Expected: exit 3; one hint contains `different project roots`, `hook-seen.json` and `update the flow there`.
-  - Must not: the hint missing.
-  - Check: `test_worktree_hook.py`, AC-006 test.
-  - WP: WP-02
-- AC-007 · Release 2.22.2
+- AC-006 · Release 2.22.3
   - Scenario: the repository.
   - Action: read the release files; run `agentic.py quality`.
-  - Expected: `plugin.json`'s version as a tuple of ints ≥ `(2, 22, 2)`; `upgrade.NOTES["2.22.2"]` exists, comes right before `"2.22.1"`, and some note contains `worktree`; `docs/how-it-works.md` contains `worktree` and `cwd` and does not contain `2.22.2`; `quality` exits 0.
-  - Must not: a line of `test_acceptance_v222.py` containing both `plugin[` and `"2.22.1"`.
-  - Check: `test_worktree_hook.py`, AC-007 test (flow repo only).
-  - WP: WP-03
+  - Expected: `plugin.json`'s version as a tuple ≥ `(2, 22, 3)`; `upgrade.NOTES["2.22.3"]` comes right before `"2.22.2"` and some note contains `wp_from`; `docs/how-it-works.md` contains `wp_from` and not `2.22.3`; `quality` exits 0.
+  - Must not: a line of `test_acceptance_v222.py` with both `plugin[` and `"2.22.2"`.
+  - Check: `test_owner_split_v2.py`, AC-006 test (flow repo only).
+  - WP: WP-02
 
 ### Work packages
 
-#### WP-01 · The hook follows the call's worktree
+#### WP-01 · Both engines give a finding to the package that owns its file, path by path
 - Wave 1.
-- Files: `.claude/bin/test_worktree_root.py`; and `.claude/bin/hook.py`, by hand (never owned: no package may own it).
-- Implements C1, C2, C3.
-- ACs: AC-001, AC-002, AC-003, AC-004, AC-008.
-- **Patterns to mirror:** `.claude/bin/hook.py:1-29` (style, fail closed); `.claude/bin/test_hook_diagnosis.py:120-145` (worktrees in tests); `.claude/bin/test_hook_path.py:27-40` (a repo with the flow).
+- Files: `.claude/bin/findings.py`, `.claude/bin/test_owner_wp.py`, `.claude/workflows/agentic-implement.js`, `.claude/bin/conformance.json`.
+- Implements C1 and C2.
+- ACs: AC-001, AC-002, AC-003, AC-004, AC-005.
+- **Patterns to mirror:** `.claude/bin/findings.py:136-167` (the function you change); `.claude/bin/test_owner_split.py:1-30` (unit tests); `.claude/workflows/agentic-implement.js:179-218` (the mirror); `.claude/bin/conformance.json:1924-1966` (a split scenario).
 - **Gotchas:**
-  - Read stdin as bytes once (`sys.stdin.buffer.read()`); the guard reads `sys.stdin.buffer` again, so hand it a `TextIOWrapper(BytesIO(raw), encoding="utf-8")`.
-  - Set `CLAUDE_PROJECT_DIR` only when the worktree was chosen, before `runpy`: `core.ROOT` is computed when the worktree's `core` is imported.
-  - A worktree's `.git` file uses forward slashes on Windows too (`gitdir: C:/…/.git/worktrees/w`); `Path` reads both.
-  - `Path.resolve()` on Windows may change the drive letter's case: compare resolved paths only.
-  - Keep `hook.py` free of flow imports; `json`, `io`, `runpy` and `time` are standard.
-  - Only main-thread calls write `worktree-roots.json`; an agent's call only reads it.
-  - Commit `hook.py` first: WP-02's `core.py` imports `linked_worktree` from it, so the order is a dependency, not a style.
-  - Known red until the later waves: AC-005, AC-006, AC-009 (WP-02), AC-007 and `test_lean`/`test_lean_hook`'s budget checks (WP-03).
-- **Exact imports and APIs:** `import io, json, os, runpy, sys, time`; `from pathlib import Path`.
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_worktree_root.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
+  - Both engines in one package: `test_pipeline.ConformanceTests` (`.claude/bin/test_pipeline.py:212-231`) runs the JS engine and the Python engine and compares their prompts, so neither engine can change alone.
+  - The ownership test is per path: `src/b/` owns `src/b/x.py`, not `src/bb/x.py`; compare ASCII-lowercased, keep the original spelling.
+  - The original's fingerprint is never recomputed; only parts get a fresh one.
+  - Keep the same-object return for unchanged findings: `test_owner_split.py:66-69` pins it.
+  - A function over 60 lines fails `quality`: move the path and owner helpers out.
+  - The workflow has 30 lines of headroom (937 stored): reuse `noRoot`, `named`, `lowAscii` and `str`, keep the mirror compact, and add no line over 120 characters.
+  - JS `sort()` on strings sorts by UTF-16 code units, Python's `sorted` by code points: equal for the ASCII paths the scenarios use.
+  - Add the Annex A scenarios exactly, at the end of `scenarios`; `json.dumps(indent=2)` reproduces the file.
+  - Known red until WP-02, and only these: `test_lean` and `test_lean_hook`'s budget checks, and AC-006 of the AT.
+- **Exact imports and APIs:** `re` (already imported), `_without_root`, `_named`, `fingerprint`.
+- **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_owner*.py"`; `node .claude/bin/test_workflow.mjs`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
 
-#### WP-02 · `core.ROOT` and the diagnosis follow the worktree
-- Wave 2 (`core.py` imports `linked_worktree` from WP-01's `hook.py` at module level: without it every flow module fails to import).
-- Files: `.claude/bin/core.py`, `.claude/bin/guardrail.py`, `.claude/bin/test_core_root.py`.
-- Implements C4, C5. Consumes C1 by implementation (`depends_on`: WP-01).
-- ACs: AC-005, AC-006, AC-009.
-- **Patterns to mirror:** `.claude/bin/core.py:18-24` (the root constants); `.claude/bin/core.py:174-186` (`root_drift`, unchanged); `.claude/bin/guardrail.py:545-560` (the hints).
-- **Gotchas:**
-  - `core` is imported by every flow module and by the hook: the import of `hook` must stay cheap (no git, a few `stat` calls).
-  - `from hook import linked_worktree` works because `core.py` already puts its folder on `sys.path` (`.claude/bin/core.py:15`).
-  - Known red until WP-03: `test_lean` (the budget) and AC-007.
-- **Exact imports and APIs:** after the `compat` import, `try: from hook import linked_worktree  # noqa: E402` and `except ImportError: linked_worktree = None` (with a comment saying why).
-- **WP validation:** `python3 -m unittest discover -s .claude/bin -p test_core_root.py`; `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 .claude/bin/agentic.py quality`.
-
-#### WP-03 · Documentation and release 2.22.2
-- Wave 3 (it measures the budget after WP-01 and WP-02).
+#### WP-02 · Documentation and release 2.22.3
+- Wave 2 (it measures the budget after WP-01).
 - Files: `docs/how-it-works.md`, `.claude-plugin/plugin.json`, `.claude/bin/upgrade.py`, `.claude/flow-budget.json`, `.claude/bin/test_acceptance_v222.py`.
-- Depends on WP-01 and WP-02 by implementation.
-- ACs: AC-007.
-- **Patterns to mirror:** `.claude/bin/upgrade.py:156-165`.
-- **What to write:** a paragraph in `how-it-works.md` (section 4, guardrails): in a worktree the hook reads the call's `cwd` and judges with that worktree's guard and root; `CLAUDE_PROJECT_DIR` names the checkout the session started in, so that checkout's `hook.py` must be this release or later. `NOTES["2.22.2"]`: one note naming `worktree`. The budget: measured with `test_lean.code_lines(Path('.'))` and `test_lean.prompt_bytes(Path('.'))`, with a `why`.
+- Depends on WP-01 by implementation.
+- ACs: AC-006.
+- **Patterns to mirror:** `.claude/bin/upgrade.py:156-164`.
+- **What to write:** in `how-it-works.md`, after the sentence on splitting a confirmed finding, one sentence: the finding's `file` is read path by path, and a finding whose `wp` owns none of its paths goes to the owner of the first one, recording the reviewer's `wp` in `wp_from`. One note in `NOTES["2.22.3"]` naming issue 149 and `wp_from`. The budget, measured with `test_lean.code_lines(Path('.'))` and `test_lean.prompt_bytes(Path('.'))`, with a `why`.
 - **WP validation:** `python3 -m unittest discover -s .claude/bin -p "test_*.py"`; `python3 -m unittest discover -s acceptance`; `python3 -m unittest discover -s qa`; `python3 .claude/bin/agentic.py quality`.
 
 ```json wp-manifest
 {
   "maintainer": true,
-  "stack": ["python"],
+  "stack": ["python", "typescript"],
   "allow_bash": ["Bash(python3 -m unittest:*)", "Bash(node .claude/bin/test_workflow.mjs)", "Bash(python3 .claude/bin/agentic.py quality)"],
-  "acceptance": {"files": [".claude/bin/test_worktree_hook.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_worktree_hook.py"},
+  "acceptance": {"files": [".claude/bin/test_owner_split_v2.py"], "command": "python3 -m unittest discover -s .claude/bin -p test_owner_split_v2.py"},
   "verify": {"build": "python3 -m unittest discover -s bench -p \"test_*.py\"", "lint": "node .claude/bin/test_workflow.mjs", "types": "python3 -m unittest discover -s bench/acceptance", "tests": "python3 -m unittest discover -s .claude/bin -p \"test_*.py\""},
   "docs": {"files": ["docs/assets/"], "codemap": null},
   "work_packages": [
-    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/test_worktree_root.py"],
-     "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-008"], "mirror": [".claude/bin/hook.py:1-29", ".claude/bin/test_hook_diagnosis.py:120-145", ".claude/bin/test_hook_path.py:27-40"]},
-    {"id": "WP-02", "wave": 2, "depends_on": ["WP-01"], "files": [".claude/bin/core.py", ".claude/bin/guardrail.py", ".claude/bin/test_core_root.py"],
-     "acs": ["AC-005", "AC-006", "AC-009"], "mirror": [".claude/bin/core.py:18-24", ".claude/bin/core.py:174-186", ".claude/bin/guardrail.py:545-560"]},
-    {"id": "WP-03", "wave": 3, "depends_on": ["WP-01", "WP-02"], "files": ["docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
-     "acs": ["AC-007"], "mirror": [".claude/bin/upgrade.py:156-165"]}
+    {"id": "WP-01", "wave": 1, "depends_on": [], "files": [".claude/bin/findings.py", ".claude/bin/test_owner_wp.py", ".claude/workflows/agentic-implement.js", ".claude/bin/conformance.json"],
+     "acs": ["AC-001", "AC-002", "AC-003", "AC-004", "AC-005"], "mirror": [".claude/bin/findings.py:136-167", ".claude/bin/test_owner_split.py:1-30", ".claude/workflows/agentic-implement.js:179-218", ".claude/bin/conformance.json:1924-1966"]},
+    {"id": "WP-02", "wave": 2, "depends_on": ["WP-01"], "files": ["docs/how-it-works.md", ".claude-plugin/plugin.json", ".claude/bin/upgrade.py", ".claude/flow-budget.json", ".claude/bin/test_acceptance_v222.py"],
+     "acs": ["AC-006"], "mirror": [".claude/bin/upgrade.py:156-164"]}
   ]
 }
 ```
 
 ## 9. Test strategy
 
-- **Unit:** WP-01 in `test_worktree_root.py` (`linked_worktree` over real `git worktree add` folders and hand-written `.git` files; `choose_root` over byte payloads); WP-02 in `test_core_root.py` (`project_root` in subprocesses, since `ROOT` is fixed at import).
-- **Acceptance (AT, wave 0):** `.claude/bin/test_worktree_hook.py`, red today: AC-001's heartbeat lands in the main checkout, AC-002 (b)'s writes are refused as `.claude/` paths, `choose_root` does not exist. Repos are built in temporary folders with `git init`, a copy of `.claude/bin` without `test_*.py` and `__pycache__`, `.claude/settings.json`, `.claude/agents`, and `architecture.md` holding `test_agentic.MANIFEST`, committed with `GIT` from `test_hook_diagnosis.py`. `hook.py` is run with `sys.executable`. AC-007 is skipped outside the flow repo. The AT must not write `"2.21.2"`, `"2.22.0"` or `"2.22.1"` on a line containing `version`: the earlier acceptance files forbid it.
-- **QA:** a real `claude --worktree` session is out of reach in CI; QA checks a Windows-style `.git` file (`gitdir: C:/…`) and a relative `gitdir`.
+- **Unit:** WP-01 in `test_owner_wp.py` (paths, owners, correction, parts, odd shapes). The JS mirror is held equal by the conformance scenarios (`test_pipeline.ConformanceTests`).
+- **Acceptance (AT, wave 0):** `.claude/bin/test_owner_split_v2.py`, red today: AC-001 gets a part and keeps `WP-01`; AC-002's pin lands on `WP-01` and a `WP-03` fix runs; AC-003 gets one finding with a comma scope. Engine criteria use the Annex A scenario names, as `test_pinned_conflict.py` does; a missing scenario raises an `AssertionError` naming it. AC-006 is skipped outside the flow repo. The AT must not write `"2.21.2"`, `"2.22.0"`, `"2.22.1"` or `"2.22.2"` on a line containing `version`.
+- **QA:** Windows-style paths with a drive letter in `file`, a `file` of only separators, duplicates.
 - Executed by hand (`"maintainer": true`).
 
 ## 10. Decisions
 
 | Decision | Discarded | Why |
 |---|---|---|
-| Root from the stdin `cwd` | The hook process's cwd; `git rev-parse` | The stdin `cwd` is documented as the worktree root; the process cwd is not. git costs a process per tool call (the hook's budget, design 0025). |
-| Any linked worktree of the same repository | Only `.claude/worktrees/` | User's choice: `sessions-check` recommends `git worktree add ../folder`. |
-| Also fix `core.ROOT` when `CLAUDE_PROJECT_DIR` names the main checkout | Only the hook | User's choice: whether Bash commands get the variable is not documented; if they did, a worktree's `agentic.py` would act on the main checkout (`root_drift` does not catch a worktree inside it). |
-| One implementation in `hook.py`, imported by `core` | A new module; two copies | A new module that `hook.py` imports would have to be never owned and installed too; `hook.py` already is both. |
-| Only a worktree with the flow installed, of the same repository | Any `.git` file | A worktree without `agentic.py` has no guard to run; another repository's guard must not judge this session's calls. |
-| Only the main thread follows the `cwd`; an agent uses the root its session's main thread chose (remembered in the project's state), a fallback agent the one its launcher set | Every call follows its own `cwd`; only `AGENTIC_WP` pinned | User's choice: an agent that ran `cd` into another worktree would otherwise be judged by that worktree's plan and guard, where today its writes are refused as outside the root. |
-| Three waves (WP-01 → WP-02 → WP-03) | WP-01 and WP-02 in one wave | `core.py` imports from `hook.py` at module level; the release measures both. |
-| Fall back to today's root on any doubt | Fail closed | Falling back is today's behaviour, never less safe; the guard still fails closed on its own errors. |
-| Version 2.22.2 | 2.23.0 | A fix. |
+| A pin applies to the finding on its own file and line only | Every part of a pinned finding goes to pending | User's choice: a part on another file is fixed elsewhere and its fix cannot break the pinned line. |
+| Correct `wp` to the owner of the first owned path, recording `wp_from` | Keep the reviewer's `wp` and only split | With the owner on the original, the line stays with the right package and `split_pinned` needs no change; the reviewer's choice stays visible. |
+| `,` and `;` separate paths | Any whitespace | Paths with spaces exist; reviewers join with commas. |
+| Unowned paths stay in the original's `scope` | Drop them | The re-review must still judge the finding in every file it names. |
+| No change to `split_pinned` or the engines' call sites | A pin per `split_from` group | The corrected original carries the line. |
+| Both engines in one package, then the release | One package per engine | The conformance test compares the engines' prompts: one engine alone fails it (precedent: design 0033). |
+| A finding not corrected whose `wp` owns only a later path of a multi-path `file` loses its `line` (its `file` becomes that path) | Keep the line | The line belongs to the first path the reviewer wrote; on another file it would be wrong, and a wrong line could pin the wrong text. |
+| `file` rewritten only for a corrected or multi-path finding | Always normalise it | A finding split only by its evidence keeps today's `file`, so its fix prompt and its pin are unchanged. |
+| Version 2.22.3 | 2.23.0 | A fix. |
 
 ## 11. Risks and open questions
 
-- **An old `hook.py` in the main checkout** keeps today's behaviour: the session starts there, so the hook comes from there. The diagnosis hint names the remedy (C5).
-- **Bash and `CLAUDE_PROJECT_DIR`**: not documented. C4 covers the variable being set; without it, `ROOT` is already the worktree.
-- **Desktop worktree sessions**: the docs say hook commands run in the main checkout root there; the stdin `cwd` is still documented as the worktree. Not measured on desktop.
-- **A real `claude --worktree` run** is not in the tests; the AT reproduces the documented values.
-- **Subagents' `session_id`** is inferred to be the parent session's (design 0024 calls it not verified). If it were another id, a native agent would fall back to the main checkout's root: today's behaviour, so its writes in the worktree are refused (a visible stop, not a hole).
-- **The `verify` phases** run the bench, the workflow and `.claude/bin`'s suite; the root `acceptance/` and `qa/` suites CI also runs are only in WP-03's validation.
-- **The main thread leaving the worktree** (`cd` back to the main checkout) removes its session's entry: agents launched after that are judged in the main checkout, as today.
-- **`waiting.py`** still writes its waiting record to the main checkout from a worktree (Excluded).
+- **A reviewer that names the right package but the wrong file** is now moved to the file's owner. The evidence still names its files, which parts cover.
+- **The field JSON confirms both cases** (`workflow-result.json` of the 2.22.2 run): the pinned original `F0c06345d` sat on WP-01 at `XMM.RemoteStream.psm1:30` while its part `F0c06345d-2` on WP-03, without a line, stayed confirmed and went to a fix; `Fceb84b39` (WP-01, three comma-joined paths, `line` 10) and `Fcb80fef6` (WP-01, eight comma-joined paths, `line` 133) kept a comma-joined `file` and `scope`, which `pinned` could not even check.
+- **A pinned finding that names several lines of one file** goes to pending whole: in the field run, `F0c06345d` also named line 3 of the same file (123 characters), which a fix would then not touch. A person decides both.
+
+## Annex A · Conformance scenarios
+
+WP-01 adds these to `.claude/bin/conformance.json`, at the end of `scenarios`, exactly.
+
+```json
+[
+  {
+    "name": "a pinned finding on a file its wp does not own goes to the owner",
+    "plan": {"owners": {"WP-01": ["src/a.py"], "WP-02": ["src/b/"], "WP-03": ["src/c.py"]}},
+    "standards": [
+      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+        {"wp": "WP-01", "file": "src/c.py", "line": 3, "problem": "OWNER-PROBLEM", "evidence": "src/c.py:3 is long",
+         "fix": "split it", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]}
+    ],
+    "gate_fail": [
+      {"prefix": "pinned", "exit_code": 0, "output": {"pinned": [
+        {"file": "src/c.py", "line": 3, "test": "acceptance/test_c.py", "test_line": 4, "text": "limit(10000"}], "skipped": []}}
+    ]
+  },
+  {
+    "name": "a finding whose file lists several paths is split by owner",
+    "plan": {"owners": {"WP-01": ["src/a.py"], "WP-02": ["src/b/"], "WP-03": ["src/c.py"]}},
+    "standards": [
+      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+        {"wp": "WP-01", "file": "src/c.py, src/b/x.py; acceptance/t.py", "line": 7, "problem": "MULTI-PROBLEM",
+         "evidence": "e", "fix": "f", "if_skipped": "drift", "provenance": "read", "tier": "reflex",
+         "rule": "No magic numbers"}]},
+      {"status": "PASS", "axis": "standards", "findings": [], "not_checked": []}
+    ]
+  },
+  {
+    "name": "a part on another file is fixed although the original is pinned",
+    "plan": {"owners": {"WP-01": ["src/a.py"], "WP-02": ["src/b/"], "WP-03": ["src/c.py"]}},
+    "standards": [
+      {"status": "FAIL", "axis": "standards", "not_checked": [], "findings": [
+        {"wp": "WP-01", "file": "src/a.py", "line": 3, "problem": "TWIN-PROBLEM", "evidence": "the same at src/c.py:9",
+         "fix": "one constant", "if_skipped": "drift", "provenance": "read", "tier": "reflex", "rule": "No magic numbers"}]},
+      {"status": "PASS", "axis": "standards", "findings": [], "not_checked": []}
+    ],
+    "gate_fail": [
+      {"prefix": "pinned", "exit_code": 0, "output": {"pinned": [
+        {"file": "src/a.py", "line": 3, "test": "acceptance/test_a.py", "test_line": 2, "text": "limit(10000"}], "skipped": []}}
+    ]
+  }
+]
+```

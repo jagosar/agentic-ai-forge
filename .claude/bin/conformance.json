@@ -2475,6 +2475,165 @@
           }
         }
       ]
+    },
+    {
+      "name": "a pinned finding on a file its wp does not own goes to the owner",
+      "plan": {
+        "owners": {
+          "WP-01": [
+            "src/a.py"
+          ],
+          "WP-02": [
+            "src/b/"
+          ],
+          "WP-03": [
+            "src/c.py"
+          ]
+        }
+      },
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-01",
+              "file": "src/c.py",
+              "line": 3,
+              "problem": "OWNER-PROBLEM",
+              "evidence": "src/c.py:3 is long",
+              "fix": "split it",
+              "if_skipped": "drift",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        }
+      ],
+      "gate_fail": [
+        {
+          "prefix": "pinned",
+          "exit_code": 0,
+          "output": {
+            "pinned": [
+              {
+                "file": "src/c.py",
+                "line": 3,
+                "test": "acceptance/test_c.py",
+                "test_line": 4,
+                "text": "limit(10000"
+              }
+            ],
+            "skipped": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a finding whose file lists several paths is split by owner",
+      "plan": {
+        "owners": {
+          "WP-01": [
+            "src/a.py"
+          ],
+          "WP-02": [
+            "src/b/"
+          ],
+          "WP-03": [
+            "src/c.py"
+          ]
+        }
+      },
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-01",
+              "file": "src/c.py, src/b/x.py; acceptance/t.py",
+              "line": 7,
+              "problem": "MULTI-PROBLEM",
+              "evidence": "e",
+              "fix": "f",
+              "if_skipped": "drift",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        },
+        {
+          "status": "PASS",
+          "axis": "standards",
+          "findings": [],
+          "not_checked": []
+        }
+      ]
+    },
+    {
+      "name": "a part on another file is fixed although the original is pinned",
+      "plan": {
+        "owners": {
+          "WP-01": [
+            "src/a.py"
+          ],
+          "WP-02": [
+            "src/b/"
+          ],
+          "WP-03": [
+            "src/c.py"
+          ]
+        }
+      },
+      "standards": [
+        {
+          "status": "FAIL",
+          "axis": "standards",
+          "not_checked": [],
+          "findings": [
+            {
+              "wp": "WP-01",
+              "file": "src/a.py",
+              "line": 3,
+              "problem": "TWIN-PROBLEM",
+              "evidence": "the same at src/c.py:9",
+              "fix": "one constant",
+              "if_skipped": "drift",
+              "provenance": "read",
+              "tier": "reflex",
+              "rule": "No magic numbers"
+            }
+          ]
+        },
+        {
+          "status": "PASS",
+          "axis": "standards",
+          "findings": [],
+          "not_checked": []
+        }
+      ],
+      "gate_fail": [
+        {
+          "prefix": "pinned",
+          "exit_code": 0,
+          "output": {
+            "pinned": [
+              {
+                "file": "src/a.py",
+                "line": 3,
+                "test": "acceptance/test_a.py",
+                "test_line": 2,
+                "text": "limit(10000"
+              }
+            ],
+            "skipped": []
+          }
+        }
+      ]
     }
   ]
 }
