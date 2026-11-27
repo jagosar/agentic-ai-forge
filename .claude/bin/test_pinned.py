@@ -48,5 +48,21 @@ class FindPinTests(unittest.TestCase):
         self.assertIsNone(find_pin("s", 2, self.SOURCE, [("t", ["'gn(9, 9, 9)'"])]))
 
 
+
+class ZoneTests(unittest.TestCase):
+    """pinned reads QA's zone too and tags each pin with its zone; a file in both zones is AT (design 0036)."""
+
+    def test_a_file_in_both_zones_counts_once_as_acceptance(self):
+        import json
+        from test_agentic import MANIFEST, Repo
+        repo = Repo(dict(MANIFEST, acceptance={"files": ["checks/"], "command": "true"}, qa={"files": ["checks/"]}))
+        self.addCleanup(repo.cleanup)
+        repo.write("src/w.ps1", "x\n$n.Show(10000, 'a')\n")
+        repo.write("checks/t.ps1", "Get-Content w.ps1\n'Show(10000'\n")
+        r = repo.run("pinned", "src/w.ps1:2")
+        out = json.loads([ln for ln in r.stdout.splitlines() if ln.startswith("{")][-1])
+        self.assertEqual([p["zone"] for p in out["pinned"]], ["AT"])
+
+
 if __name__ == "__main__":
     unittest.main()
